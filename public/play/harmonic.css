@@ -1,0 +1,870 @@
+/* ============================================================
+   Symphony players, shared design system. Neo-brutalist.
+
+   One stylesheet for bass.html, piano-player.html and drums-player.html, built
+   on the same tokens as the studio (src/style.css) and the 3D room (src/config.js).
+
+   Rules:
+     - six colours, all flat. No gradients, blur, glow or soft shadow.
+     - 3px / 4px solid black borders, zero radius, everywhere.
+     - one shadow: solid black, zero blur, always down-right.
+     - pressable things lift on hover and drop into their shadow on press. 120 ms.
+     - Archivo Black (display) · Space Grotesk (body) · Space Mono (labels).
+
+   Page skeleton, top to bottom:
+     .rail       paper strip: back button · title · jam + camera status
+     .controls   a full-width band in the INSTRUMENT'S colour
+     .stage      the camera in a thick frame, on a dotted field
+   ============================================================ */
+
+:root {
+  --paper: #fbf6ea;
+  --ink: #3a3633;
+  --yellow: #ffdf6b;
+  --pink: #ff8fa9;
+  --blue: #74a9ff;
+  --green: #63d490;
+
+  --accent: var(--yellow); /* the instrument's colour: controls band, number tag */
+  --pop: var(--pink);      /* the primary button: always a different colour from --accent */
+
+  --bw: 2px;
+  --bw-lg: 3px;
+  --sh-sm: 3px 3px 0 var(--ink);
+  --sh: 4px 4px 0 var(--ink);
+  --sh-lg: 6px 6px 0 var(--ink);
+  --sh-up: 6px 6px 0 var(--ink); /* a --sh block, lifted on hover */
+  --sh-xs: 2px 2px 0 var(--ink);
+  --sh-none: 0 0 0 var(--ink); /* pressed all the way in */
+  --bw-sm: 2px; /* small marks only: dots, swatches */
+
+  --display: "Archivo Black", "Arial Black", Impact, sans-serif;
+  --font: "Space Grotesk", "Trebuchet MS", Verdana, sans-serif;
+  --mono: "Space Mono", "Courier New", monospace;
+
+  --fast: 120ms;
+  --gutter: clamp(0.8rem, 2.2vw, 1.8rem);
+
+  /* dotted field: an SVG tile, not a CSS gradient */
+  --dots: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26'%3E%3Crect x='11' y='11' width='4' height='4' fill='%233a3633' fill-opacity='.34'/%3E%3C/svg%3E");
+}
+
+.hm--bass { --accent: var(--pink); --pop: var(--yellow); }
+.hm--piano { --accent: var(--yellow); --pop: var(--pink); }
+.hm--drums { --accent: var(--blue); --pop: var(--yellow); }
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+  background: var(--paper);
+}
+
+/* components set their own `display`, which would otherwise beat the hidden attribute */
+[hidden] {
+  display: none !important;
+}
+
+body.hm {
+  margin: 0;
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.35;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  background: var(--paper) var(--dots);
+}
+
+/* page wipe: a black block slides off to open the page and back on to leave it,
+   matching the studio's own wipe so moving between pages reads as one cut */
+body.hm::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: var(--ink);
+  pointer-events: none;
+  animation: wipe-off 260ms cubic-bezier(0.7, 0, 0.3, 1) 60ms both;
+}
+html.is-leaving body.hm::after {
+  animation: wipe-on 220ms cubic-bezier(0.7, 0, 0.3, 1) both;
+}
+@keyframes wipe-off {
+  from { transform: none; }
+  to { transform: translateX(-101%); }
+}
+@keyframes wipe-on {
+  from { transform: translateX(101%); }
+  to { transform: none; }
+}
+@keyframes blink {
+  50% { opacity: 0.15; }
+}
+
+/* ---------- shared voices ---------- */
+.rail__back,
+.rail__no,
+.rail__mode,
+.status-badge,
+.field__label,
+.note,
+.score,
+.finger-info,
+.legend-chip,
+.cam-loading,
+.cam-overlay__eyebrow,
+.perf,
+.jam,
+.hm-toast {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* a pressable block */
+.rail__back,
+.btn,
+.string,
+select.input {
+  border: var(--bw) solid var(--ink);
+  border-radius: 0;
+  box-shadow: var(--sh-sm);
+  transition: transform var(--fast) linear, box-shadow var(--fast) linear, background-color var(--fast) linear, color var(--fast) linear;
+}
+.rail__back:hover,
+.btn:hover,
+.string:hover,
+select.input:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: var(--sh);
+}
+.rail__back:active,
+.btn:active,
+.string:active {
+  transform: translate(4px, 4px);
+  box-shadow: var(--sh-none);
+}
+
+:focus-visible {
+  outline: var(--bw) solid var(--ink);
+  outline-offset: 3px;
+}
+
+/* ---------- rail ---------- */
+.rail {
+  display: flex;
+  flex-wrap: wrap; /* the jam bar drops to a second row on narrow windows */
+  align-items: center;
+  gap: 0.6rem clamp(0.8rem, 2vw, 1.5rem);
+  padding: 0.7rem var(--gutter) 0.75rem;
+  background: var(--paper);
+  border-bottom: var(--bw-lg) solid var(--ink);
+}
+.rail__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.5rem 0.7rem 0.48rem 0.55rem;
+  background: var(--paper);
+  color: var(--ink);
+  text-decoration: none;
+}
+.rail__back svg {
+  width: 1rem;
+  height: 1rem;
+  stroke-width: 3;
+  stroke-linecap: square;
+}
+.rail__title {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+}
+.rail__no {
+  padding: 0.28rem 0.5rem;
+  background: var(--accent);
+  border: var(--bw) solid var(--ink);
+  white-space: nowrap;
+  transform: rotate(-4deg);
+}
+.rail__name {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: clamp(1.7rem, 4.2vw, 2.9rem);
+  line-height: 0.86;
+  letter-spacing: -0.045em;
+  text-transform: uppercase;
+}
+.rail__mode {
+  padding: 0.28rem 0.5rem;
+  background: var(--ink);
+  color: var(--paper);
+  white-space: nowrap;
+}
+.rail__meta {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.42rem 0.6rem;
+  background: var(--paper);
+  border: var(--bw) solid var(--ink);
+  white-space: nowrap;
+}
+.status-dot {
+  width: 0.7rem;
+  height: 0.7rem;
+  background: var(--paper);
+  border: var(--bw-sm) solid var(--ink);
+}
+/* live camera state, driven by <body data-cam="..."> (see harmonic-ui.js) */
+body[data-cam="loading"] #camStatus { background: var(--yellow); }
+body[data-cam="loading"] #camStatus .status-dot {
+  background: var(--ink);
+  animation: blink 0.6s steps(2, jump-none) infinite;
+}
+body[data-cam="live"] #camStatus .status-dot { background: var(--green); }
+body[data-cam="blocked"] #camStatus { background: var(--pink); }
+body[data-cam="blocked"] #camStatus .status-dot { background: var(--ink); }
+
+/* responsiveness readout: camera frames per second + tracking time (harmonic-ui.js) */
+.perf {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+/* the numbers only mean something while the camera is running */
+body:not([data-cam="live"]) .perf {
+  display: none;
+}
+.perf.is-slow {
+  padding: 0.2rem 0.4rem;
+  background: var(--pink);
+  border: var(--bw) solid var(--ink);
+}
+
+.score {
+  padding: 0.42rem 0.6rem;
+  background: var(--green);
+  border: var(--bw) solid var(--ink);
+  white-space: nowrap;
+}
+.score:empty { display: none; }
+
+/* ---------- Band Mode: the jam bar (built by jam-core.js when ?jamRoom is set) ---------- */
+.jam {
+  display: inline-flex;
+  align-items: stretch;
+  background: var(--green);
+  border: var(--bw) solid var(--ink);
+  white-space: nowrap;
+}
+.jam > * {
+  display: inline-flex;
+  align-items: center;
+}
+.jam__dot {
+  width: 0.65rem;
+  height: 0.65rem;
+  align-self: center;
+  margin-left: 0.6rem;
+  background: var(--ink);
+  animation: blink 1s steps(2, jump-none) infinite;
+}
+.jam[data-state="offline"],
+.jam[data-state="full"] {
+  background: var(--pink);
+}
+.jam__code {
+  padding: 0.42rem 0.6rem 0.42rem 0.5rem;
+}
+.jam__k {
+  margin-right: 0.5em;
+}
+.jam__room {
+  letter-spacing: 0.16em;
+}
+.jam__roster {
+  gap: 0.3rem;
+  padding-right: 0.5rem;
+}
+.jam__alone {
+  opacity: 0.75;
+}
+/* one chip per bandmate, in their instrument's colour; it stamps when they play */
+.jam__player {
+  padding: 0.14rem 0.4rem;
+  background: var(--c);
+  border: var(--bw-sm) solid var(--ink);
+}
+.jam__player.is-playing {
+  background: var(--ink);
+  color: var(--paper);
+  transform: translate(2px, 2px);
+}
+.jam__copy {
+  padding: 0 0.7rem;
+  background: var(--paper);
+  border: 0;
+  border-left: var(--bw) solid var(--ink);
+  color: var(--ink);
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+  transition: background-color var(--fast) linear, color var(--fast) linear;
+}
+.jam__copy:hover { background: var(--yellow); }
+.jam__copy:active {
+  background: var(--ink);
+  color: var(--paper);
+}
+.jam__copy:focus-visible { outline-offset: -6px; }
+.jam__cam[aria-pressed="false"] { background: var(--pink); }
+
+/* ---------- Band Mode: bandmates' cameras, a small stack on the left ---------- */
+.band-cams {
+  position: fixed;
+  left: var(--gutter);
+  bottom: calc(var(--gutter) + 6px);
+  z-index: 60;
+  display: flex;
+  flex-direction: column-reverse; /* the first bandmate sits at the bottom, the rest stack up */
+  gap: 0.8rem;
+  width: clamp(120px, 11.5vw, 184px); /* sized to sit in the margin beside the camera frame */
+  pointer-events: none;
+}
+.bandcam {
+  position: relative;
+  margin: 0;
+  aspect-ratio: 4 / 3;
+  background: var(--ink);
+  border: var(--bw) solid var(--ink);
+  box-shadow: var(--sh);
+  transition: transform var(--fast) linear, box-shadow var(--fast) linear;
+}
+.bandcam video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* who it is: their instrument, in their instrument's colour */
+.bandcam figcaption {
+  position: absolute;
+  left: calc(var(--bw) * -1);
+  bottom: calc(var(--bw) * -1);
+  padding: 0.18rem 0.45rem 0.14rem;
+  background: var(--c, var(--paper));
+  border: var(--bw) solid var(--ink);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+/* it stamps when they play, like their chip in the bar */
+.bandcam.is-playing {
+  transform: translate(3px, 3px);
+  box-shadow: var(--sh-none);
+}
+.bandcam:nth-child(n + 5) {
+  display: none; /* four boxes is all the left edge has room for */
+}
+
+/* ---------- controls: a band in the instrument's colour ---------- */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem clamp(0.8rem, 1.8vw, 1.4rem);
+  min-height: 3.7rem;
+  padding: 0.65rem var(--gutter) 0.7rem;
+  background: var(--accent);
+  border-bottom: var(--bw-lg) solid var(--ink);
+}
+.controls__push { margin-left: auto; }
+
+.field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.note {
+  margin: 0;
+  line-height: 1.3;
+}
+.note.is-alert {
+  padding: 0.3rem 0.5rem;
+  background: var(--ink);
+  color: var(--paper);
+}
+.value {
+  min-width: 2.6em;
+  font-family: var(--mono);
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.95rem 0.56rem;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: 0.95rem;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.btn:disabled {
+  cursor: progress;
+}
+.btn--primary {
+  background: var(--pop);
+}
+/* "Stop" while a song runs: the same key, inverted */
+.btn--primary.is-playing {
+  background: var(--ink);
+  color: var(--paper);
+}
+.btn--lg {
+  padding: 0.85rem 1.3rem 0.8rem;
+  font-size: 1.15rem;
+  box-shadow: var(--sh);
+}
+.btn--sm {
+  padding: 0.45rem 0.65rem 0.42rem;
+  font-size: 0.8rem;
+}
+
+select.input {
+  appearance: none;
+  -webkit-appearance: none;
+  min-width: min(17rem, 60vw);
+  padding: 0.55rem 2.4rem 0.52rem 0.75rem;
+  background: var(--paper) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233a3633' stroke-width='4' stroke-linecap='square'%3E%3Cpath d='M5 9l7 7 7-7'/%3E%3C/svg%3E") no-repeat right 0.7rem center / 1.05rem;
+  color: var(--ink);
+  font: 700 0.98rem/1.2 var(--font);
+  cursor: pointer;
+}
+select.input option {
+  background: var(--paper);
+  color: var(--ink);
+}
+/* "you need to pick one": a hard double knock, no easing */
+select.input.is-nudge { animation: nudge 240ms steps(4, end); }
+@keyframes nudge {
+  0%, 100% { transform: none; }
+  25% { transform: translateX(-8px); }
+  50% { transform: translateX(8px); }
+  75% { transform: translateX(-4px); }
+}
+
+input[type="range"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: clamp(5.5rem, 12vw, 9rem);
+  height: 1.6rem;
+  background: transparent;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  background: var(--ink);
+}
+input[type="range"]::-moz-range-track {
+  height: 6px;
+  background: var(--ink);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 22px;
+  margin-top: -8px;
+  background: var(--paper);
+  border: var(--bw) solid var(--ink);
+  border-radius: 0;
+  box-shadow: var(--sh-xs);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 18px;
+  background: var(--paper);
+  border: var(--bw) solid var(--ink);
+  border-radius: 0;
+}
+input[type="range"]:active::-webkit-slider-thumb {
+  background: var(--pop);
+  box-shadow: none;
+}
+
+/* ---------- stage: the camera in a thick frame ---------- */
+.stage {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: clamp(1rem, 2vw, 1.6rem);
+  /* right/bottom leave room for the frames' hard shadows */
+  padding: clamp(0.9rem, 2.2vw, 1.5rem) calc(var(--gutter) + 10px) calc(clamp(0.9rem, 2.2vw, 1.5rem) + 10px) var(--gutter);
+}
+.stage--split {
+  grid-template-columns: minmax(0, 1fr) clamp(250px, 26vw, 340px);
+}
+
+/* The frame is the largest box of the camera's own aspect ratio (--ar, 4:3 until
+   the real stream reports otherwise) that fits its column, sized in pure CSS with
+   container units. Matching the stream's aspect means the video is never cropped,
+   so hand-landmark dots land exactly on the fingers. */
+.cam-col {
+  min-width: 0;
+  min-height: 0;
+  container-type: size;
+  display: grid;
+  place-items: center;
+}
+.cam-frame {
+  --ar: 1.3333;
+  position: relative;
+  width: min(100cqw, calc(100cqh * var(--ar)));
+  aspect-ratio: var(--ar);
+  overflow: hidden;
+  background: var(--ink);
+  border: var(--bw-lg) solid var(--ink);
+  box-shadow: var(--sh-lg);
+}
+.cam-frame video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1); /* selfie view */
+  visibility: hidden;
+}
+body[data-cam="live"] .cam-frame video { visibility: visible; }
+.cam-frame canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* loading state: shown until the camera is live or refused */
+.cam-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 1rem;
+  background: var(--ink);
+  color: var(--paper);
+}
+/* a block that marches across a track, in hard steps */
+.cam-loading::before {
+  content: "";
+  width: 7.5rem;
+  height: 1.1rem;
+  border: var(--bw) solid var(--paper);
+  background: var(--yellow) no-repeat;
+  background-size: 25% 100%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'%3E%3Crect width='1' height='1' fill='%233a3633'/%3E%3C/svg%3E");
+  animation: march 0.8s steps(4, jump-none) infinite;
+}
+@keyframes march {
+  from { background-position: 0 0; }
+  to { background-position: 100% 0; }
+}
+body:not([data-cam="loading"]) .cam-loading {
+  visibility: hidden;
+}
+
+/* camera refused / unavailable */
+.cam-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: none;
+  place-items: center;
+  padding: 1.2rem 1.6rem 1.6rem 1.2rem;
+  background: var(--accent); /* a flat block of the instrument's colour */
+}
+.cam-overlay.is-visible,
+.cam-overlay.show {
+  display: grid;
+}
+.cam-overlay__card {
+  position: relative;
+  display: grid;
+  justify-items: start;
+  gap: 0.7rem;
+  max-width: 27rem;
+  padding: 1.5rem 1.3rem 1.3rem;
+  background: var(--paper);
+  border: var(--bw-lg) solid var(--ink);
+  box-shadow: var(--sh-lg);
+  transform: rotate(-1.2deg);
+}
+.cam-overlay__eyebrow {
+  position: absolute;
+  top: -1.05rem;
+  left: 1rem;
+  padding: 0.28rem 0.55rem;
+  background: var(--ink);
+  color: var(--paper);
+  border: var(--bw) solid var(--ink);
+  transform: rotate(-3deg);
+}
+.cam-overlay__title {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: clamp(1.5rem, 3.6vw, 2.3rem);
+  line-height: 0.92;
+  letter-spacing: -0.035em;
+  text-transform: uppercase;
+}
+.cam-overlay__help {
+  margin: 0 0 0.3rem;
+  font-weight: 500;
+}
+/* the drums engine keeps a start button for its own start path; it is driven
+   programmatically (auto-start + the retry button), never shown */
+.start-overlay { display: none !important; }
+
+.finger-info {
+  position: absolute;
+  left: 0.8rem;
+  bottom: 0.8rem;
+  z-index: 4;
+  display: none;
+  padding: 0.35rem 0.55rem;
+  background: var(--paper);
+  border: var(--bw) solid var(--ink);
+}
+
+/* ---------- bass: strings you can also tap ---------- */
+.strings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+.string {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.45rem 0.65rem 0.42rem;
+  background: var(--paper);
+  color: var(--ink);
+  font: 700 0.95rem/1 var(--mono);
+  cursor: pointer;
+}
+.string::before {
+  content: "";
+  width: 1.5rem;
+  height: 0.7rem;
+  background: var(--c);
+  border: var(--bw-sm) solid var(--ink);
+}
+.string .pill-status {
+  min-width: 3.1em;
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+}
+/* plucked: the key stays down, in the string's colour */
+.string.active {
+  background: var(--c);
+  transform: translate(4px, 4px);
+  box-shadow: var(--sh-none);
+}
+.string.active::before { background: var(--ink); }
+
+/* ---------- drums: pad legend ---------- */
+.legend-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.3rem 0.55rem;
+  background: var(--paper);
+  border: var(--bw) solid var(--ink);
+}
+.legend-chip .dot {
+  width: 0.8rem;
+  height: 0.8rem;
+  border: var(--bw-sm) solid var(--ink);
+}
+
+/* ---------- piano: sheet-music side panel ---------- */
+.side {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--paper);
+  border: var(--bw-lg) solid var(--ink);
+  box-shadow: var(--sh-lg);
+}
+.side__head {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.8rem 0.85rem 0.9rem;
+  background: var(--blue);
+  border-bottom: var(--bw-lg) solid var(--ink);
+}
+.side__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+.side__title {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: clamp(1rem, 1.5vw, 1.3rem);
+  line-height: 0.9;
+  letter-spacing: -0.03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.side select.input {
+  width: 100%;
+  min-width: 0;
+}
+#pdfPlaceholder {
+  flex: 1;
+  display: grid;
+  place-content: center;
+  margin: 0.9rem;
+  padding: 1rem;
+  border: var(--bw) dashed var(--ink);
+  text-align: center;
+  font-weight: 700;
+}
+#pdfPlaceholder p { margin: 0; }
+#pdfViewer {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: #fff;
+}
+
+/* MIDI track picker (modal) */
+#trackPickerOverlay { background: rgba(58, 54, 51, 0.58); }
+.track-modal {
+  padding: 1.3rem;
+  background: var(--paper);
+  border: var(--bw-lg) solid var(--ink);
+  box-shadow: var(--sh-lg);
+}
+.track-modal h3 {
+  margin: 0 0 1rem;
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 1.4rem;
+  text-transform: uppercase;
+}
+
+/* ---------- toast (HarmonicUI.toast): hints, jam joins and leaves ---------- */
+.hm-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  z-index: 10000;
+  max-width: min(92vw, 44rem);
+  padding: 0.6rem 0.9rem;
+  background: var(--yellow);
+  border: var(--bw) solid var(--ink);
+  box-shadow: var(--sh);
+  color: var(--ink);
+  line-height: 1.4;
+  text-align: center;
+  pointer-events: none;
+  visibility: hidden;
+  transform: translate(-50%, 16px);
+  transition: transform var(--fast) linear, visibility 0s linear var(--fast);
+}
+.hm-toast.is-on {
+  visibility: visible;
+  transform: translate(-50%, 0);
+  transition: transform var(--fast) linear, visibility 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ---------- narrow / portrait: stack and let the page scroll ---------- */
+@media (max-width: 860px) {
+  body.hm {
+    height: auto;
+    min-height: 100dvh;
+    overflow: auto;
+    grid-template-rows: auto auto auto;
+  }
+  .rail__mode { display: none; }
+  .rail__meta { margin-left: 0; justify-content: flex-start; }
+  .controls__push { margin-left: 0; }
+  .stage,
+  .stage--split {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+  }
+  .cam-col { container-type: inline-size; }
+  .cam-frame { width: 100cqw; }
+  .side { height: 62vh; }
+  .band-cams { width: 104px; gap: 0.5rem; }
+  .bandcam:nth-child(n + 3) { display: none; }
+}
+@media (max-width: 520px) {
+  select.input { min-width: 0; width: 100%; }
+  .field:has(select.input) { flex: 1 1 100%; }
+  .btn--primary { flex: 1 1 auto; }
+  .jam__roster { display: none; }
+}

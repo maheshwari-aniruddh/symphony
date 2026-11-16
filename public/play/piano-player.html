@@ -1,0 +1,1095 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Piano · Symphony</title>
+    <meta name="theme-color" content="#3a3633">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+    <!-- Neo-brutalist type: Archivo Black (display) / Space Grotesk (body) / Space Mono (labels) -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap"
+        rel="stylesheet">
+    <!-- Shared player design system (neo-brutalist; same tokens as the studio) -->
+    <link rel="stylesheet" href="harmonic.css">
+    </head>
+
+<body class="hm hm--piano" data-cam="loading">
+    <!-- Rail: back · title · status. (.mode-header is kept: the jam badge is appended to it) -->
+    <header class="rail mode-header">
+        <a href="/?studio=1" class="rail__back" data-leave>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                stroke-linejoin="round" aria-hidden="true">
+                <path d="M15 18l-6-6 6-6" />
+            </svg>
+            <span>Studio</span>
+        </a>
+        <div class="rail__title">
+            <span class="rail__no">No. 02</span>
+            <h1 class="rail__name">Piano</h1>
+            <span class="rail__mode" id="modeTitle">player mode</span>
+        </div>
+        <div class="rail__meta">
+            <div id="scoreDisplay" class="score" aria-live="polite"></div>
+            <div class="status-badge" id="camStatus">
+                <i class="status-dot"></i>
+                <span>Waking camera</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Song controls -->
+    <div class="controls song-controls">
+        <label class="field" id="songField">
+            <span class="field__label">Song</span>
+            <select id="songSelect" class="input song-select">
+                <option value="">Choose a song</option>
+                <option value="twinkle">Twinkle Twinkle Little Star</option>
+                <option value="mary">Mary Had a Little Lamb</option>
+                <option value="hot_cross_buns">Hot Cross Buns</option>
+                <option value="row_row_row">Row Row Row Your Boat</option>
+                <option value="happy_birthday">Happy Birthday</option>
+                <option value="believer_intro">Believer (Intro)</option>
+                <option value="shape_of_you">Shape of You</option>
+            </select>
+        </label>
+        <button id="startBtn" class="btn btn--primary" type="button">Start song</button>
+        <label class="field">
+            <span class="field__label">Sensitivity</span>
+            <input type="range" id="sensitivitySlider" min="0.1" max="1.0" step="0.05" value="0.5">
+            <span id="sensitivityValue" class="value">0.50</span>
+        </label>
+        <div class="field controls__push" id="midiGroup">
+            <span id="midiStatus" class="note" role="status"></span>
+            <button id="midiUploadBtn" class="btn" type="button">Upload MIDI</button>
+            <input type="file" id="midiFileInput" accept=".mid,.midi" hidden>
+        </div>
+    </div>
+
+    <!-- Track picker modal (hidden by default) -->
+    <div id="trackPickerOverlay"
+        style="display:none;position:fixed;inset:0;z-index:9999;align-items:center;justify-content:center;">
+        <div class="track-modal" style="max-width:520px;width:90%;max-height:70vh;overflow-y:auto;">
+            <h3>Select a track to practise</h3>
+            <div id="trackList" style="display:flex;flex-direction:column;gap:8px;"></div>
+            <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end;">
+                <button id="trackPickerCancel" class="btn" type="button">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stage: camera + sheet music -->
+    <main class="stage stage--split">
+        <div class="cam-col">
+            <!-- .cam-frame must stay the direct parent of #playerCanvas (canvas sizing) -->
+            <div class="cam-frame">
+                <video id="playerVideo" autoplay playsinline muted></video>
+                <canvas id="playerCanvas"></canvas>
+                <div class="cam-loading" aria-hidden="true">Waking the camera</div>
+                <!-- Camera refused / unavailable (shown on a start failure) -->
+                <div id="camOverlay" class="cam-overlay" role="alertdialog" aria-modal="true"
+                    aria-labelledby="camOverlayTitle">
+                    <div class="cam-overlay__card">
+                        <span class="cam-overlay__eyebrow">Camera's off</span>
+                        <h2 class="cam-overlay__title" id="camOverlayTitle">No camera, no piano.</h2>
+                        <p class="cam-overlay__help" id="camOverlayHelp">We need your webcam to follow your hands.
+                            Allow camera access, then press the button.</p>
+                        <button id="camRetryBtn" class="btn btn--primary btn--lg" type="button">Enable camera</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <aside class="side" id="pdfContainer" aria-label="Sheet music">
+            <div class="side__head">
+                <div class="side__row">
+                    <h2 class="side__title">Sheet music</h2>
+                    <button type="button" id="pdfUploadBtn" class="btn btn--sm">Upload PDF</button>
+                    <input type="file" id="pdfUploadInput" accept=".pdf" hidden>
+                </div>
+                <select id="pdfSelect" class="input" aria-label="Choose sheet music">
+                    <option value="">Choose a score</option>
+                    <option value="pdfs/Twinkle Twinkle Little Star Level 1 easy.pdf">Twinkle Twinkle Little Star
+                    </option>
+                    <option value="pdfs/Hot Cross Buns.pdf">Hot Cross Buns</option>
+                    <option value="pdfs/mary had a little lamb with letters.pdf">Mary Had a Little Lamb</option>
+                </select>
+            </div>
+
+            <div id="pdfPlaceholder">
+                <p>Pick a score above,<br>or upload your own PDF.</p>
+            </div>
+            <iframe id="pdfViewer" style="display:none;" title="Sheet music"></iframe>
+        </aside>
+    </main>
+
+    <!-- hand-tracker.js first: it starts loading the tracking model immediately -->
+    <script src="hand-tracker.js"></script>
+    <script src="harmonic-ui.js"></script>
+    <script src="jam-core.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // The optional song server (music_api.py) is reached same-origin at /api,
+            // through the dev/preview proxy in vite.config.js. One origin means this
+            // works unchanged on localhost, a LAN address or behind an HTTPS tunnel.
+            const API = '';
+
+            // 'player' (default) = must select a song and press Start before any note plays.
+            // 'composer' = free play immediately, no song required.
+            const MODE = (new URLSearchParams(window.location.search).get('mode') === 'composer')
+                ? 'composer' : 'player';
+
+            const songSelect = document.getElementById('songSelect');
+            const startBtn = document.getElementById('startBtn');
+            const sensitivitySlider = document.getElementById('sensitivitySlider');
+            const sensitivityValue = document.getElementById('sensitivityValue');
+            const videoEl = document.getElementById('playerVideo');
+            const canvasEl = document.getElementById('playerCanvas');
+            const ctx = canvasEl.getContext('2d');
+            const midiUploadBtn = document.getElementById('midiUploadBtn');
+            const midiFileInput = document.getElementById('midiFileInput');
+            const midiStatus = document.getElementById('midiStatus');
+            const trackPickerOverlay = document.getElementById('trackPickerOverlay');
+            const trackList = document.getElementById('trackList');
+            const trackPickerCancel = document.getElementById('trackPickerCancel');
+            const pdfUploadInput = document.getElementById('pdfUploadInput');
+            const pdfViewer = document.getElementById('pdfViewer');
+            const pdfPlaceholder = document.getElementById('pdfPlaceholder');
+            const pdfSelect = document.getElementById('pdfSelect');
+
+            // Composer mode: free play, so hide all the song-practice controls and
+            // relabel the header. Camera, sensitivity and the PDF viewer stay.
+            if (MODE === 'composer') {
+                document.title = 'Piano, composer · Symphony';
+                const modeTitle = document.getElementById('modeTitle');
+                if (modeTitle) modeTitle.textContent = 'composer mode';
+                // Hide each song control together with its label / wrapper.
+                [document.getElementById('songField'), startBtn, document.getElementById('midiGroup')].forEach(el => {
+                    if (el) el.hidden = true;
+                });
+            }
+
+            // Small status line next to the controls (song loading, uploads, nudges).
+            let statusTimer = null;
+            function setStatus(text, { alert = false, sticky = false } = {}) {
+                midiStatus.textContent = text;
+                midiStatus.classList.toggle('is-alert', alert);
+                clearTimeout(statusTimer);
+                if (text && !sticky) statusTimer = setTimeout(() => { midiStatus.textContent = ''; }, 4000);
+            }
+
+            // Helper to show a PDF in the viewer
+            function showPdf(url) {
+                pdfViewer.src = url;
+                pdfViewer.style.display = 'block';
+                pdfPlaceholder.style.display = 'none';
+            }
+
+            // Dropdown selection handler
+            pdfSelect.addEventListener('change', () => {
+                const val = pdfSelect.value;
+                if (val) {
+                    showPdf(val);
+                }
+            });
+
+            // Handling local PDF uploads
+            document.getElementById('pdfUploadBtn').addEventListener('click', () => pdfUploadInput.click());
+            pdfUploadInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file && file.type === 'application/pdf') {
+                    const objectUrl = URL.createObjectURL(file);
+                    showPdf(objectUrl);
+                    pdfSelect.value = ''; // Reset dropdown since custom file is loaded
+                }
+            });
+
+            sensitivitySlider.addEventListener('input', () => {
+                sensitivityValue.textContent = parseFloat(sensitivitySlider.value).toFixed(2);
+            });
+
+            /* ── Audio ── */
+            const PIANO_NOTES = [];
+            for (let oct = 3; oct <= 6; oct++) {
+                ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'].forEach(n => {
+                    PIANO_NOTES.push(n + oct);
+                });
+            }
+            const NOTE_FREQ = {};
+            PIANO_NOTES.forEach(n => {
+                const m = n.match(/^([A-G]#?)(\d+)$/);
+                if (!m) return;
+                const semi = { 'C': 0, 'C#': 1, 'D': 2, 'D#': 3, 'E': 4, 'F': 5, 'F#': 6, 'G': 7, 'G#': 8, 'A': 9, 'A#': 10, 'B': 11 };
+                const midi = (parseInt(m[2]) + 1) * 12 + (semi[m[1]] || 0);
+                NOTE_FREQ[n] = 440 * Math.pow(2, (midi - 69) / 12);
+            });
+
+            let audioCtx = null, masterGain = null;
+            let pianoSamplesLoaded = false;
+            const pianoBuffers = {};
+
+            const PIANO_FILES = {
+                'C': 'sounds/c1.wav', 'C#': 'sounds/c1s.wav', 'D': 'sounds/d1.wav', 'D#': 'sounds/d1s.wav',
+                'E': 'sounds/e1.wav', 'F': 'sounds/f1.wav', 'F#': 'sounds/f1s.wav', 'G': 'sounds/g1.wav',
+                'G#': 'sounds/g1s.wav', 'A': 'sounds/a1.wav', 'A#': 'sounds/a1s.wav', 'B': 'sounds/b1.wav'
+            };
+
+            // Memoised: initAudio(), startSong() and playNote() can all ask for the
+            // samples while a load is still in flight; share the one promise instead
+            // of fetching + decoding all 12 files again.
+            let pianoSamplesPromise = null;
+            function loadPianoSamples() {
+                // Deferred a microtask so the promise is stored BEFORE the loader runs
+                // (the loader can re-enter here through initAudio()).
+                if (!pianoSamplesPromise) pianoSamplesPromise = Promise.resolve().then(loadPianoSamplesOnce);
+                return pianoSamplesPromise;
+            }
+
+            async function loadPianoSamplesOnce() {
+                if (!audioCtx) initAudio(); // not awaited: decoding works before audio is unlocked
+                if (pianoSamplesLoaded) return;
+                await Promise.all(Object.entries(PIANO_FILES).map(async ([note, url]) => {
+                    try {
+                        const r = await fetch(url);
+                        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                        const buf = await audioCtx.decodeAudioData(await r.arrayBuffer());
+                        HarmonicUI.onset(buf); // measure the sample's dead air now, not on the first note
+                        pianoBuffers[note] = buf;
+                    } catch (e) {
+                        console.error('Failed to load piano sample:', note, e);
+                    }
+                }));
+                pianoSamplesLoaded = true;
+            }
+
+            async function initAudio() {
+                if (!audioCtx) {
+                    audioCtx = HarmonicUI.audioContext(); // asks for the smallest output buffer
+                    masterGain = audioCtx.createGain();
+                    masterGain.gain.value = 0.8;
+                    masterGain.connect(audioCtx.destination);
+
+                    // Eagerly preload sounds so the first strike isn't silent.
+                    // Safe to call here: audioCtx is already assigned above, so
+                    // loadPianoSamples()'s own initAudio() guard won't recurse.
+                    loadPianoSamples();
+                }
+
+                // Chrome Autoplay Policy: if context is suspended, resume it on user gesture
+                if (audioCtx.state === 'suspended') await audioCtx.resume();
+            }
+            initAudio(); // create + decode up front, so the first note has nothing to wait for
+
+            // Band Mode: joining the room, the roster in the rail and the other players'
+            // SOUND all live in jam-core.js. This page only adds a visual cue, a green
+            // line across the top of the camera view whenever someone else plays.
+            let remoteFlashAt = -1e9;
+            window.addEventListener('harmonic:remote-note', () => { remoteFlashAt = performance.now(); });
+
+            // `speed` multiplier controls free-play continuous pitching.
+            // Synchronous on purpose: once the samples are in memory, a strike goes from
+            // "the finger moved" to source.start() inside the same task, nothing awaited.
+            function playNote(note, vel, speed = 1.0) {
+                const match = /^([A-G]#?)(\d+)$/i.exec(note);
+                if (!match) return;
+                const baseNote = match[1].toUpperCase();
+                // samples are recorded at octave 4; shift by whole octaves from there
+                const octave = parseInt(match[2], 10);
+                const pitchRatio = Math.pow(2, (isNaN(octave) ? 4 : octave) - 4) * speed;
+
+                const start = () => {
+                    const buf = pianoBuffers[baseNote];
+                    if (!buf) return;
+                    const t = audioCtx.currentTime;
+                    const source = audioCtx.createBufferSource();
+                    source.buffer = buf;
+                    source.playbackRate.value = pitchRatio;
+
+                    // 3 ms attack: quick enough to feel immediate, long enough not to click
+                    const peak = Math.max(0.08, Math.min(vel, 1)) * 0.9;
+                    const g = audioCtx.createGain();
+                    g.gain.setValueAtTime(0, t);
+                    g.gain.linearRampToValueAtTime(peak, t + 0.003);
+                    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.4);
+
+                    source.connect(g);
+                    g.connect(masterGain);
+                    // skip the dead air some recordings start with (A# had 47 ms of it)
+                    source.start(t, HarmonicUI.onset(buf));
+                };
+
+                if (!audioCtx) initAudio();
+                if (audioCtx.state === 'running' && pianoSamplesLoaded) { start(); return; }
+
+                // Not ready yet (samples still decoding, or the browser hasn't allowed
+                // sound before a first click). Play as soon as it is, but only if that
+                // is within a moment: a note must never pop out long after the strike.
+                loadPianoSamples();
+                audioCtx.resume().catch(() => { });
+                const asked = performance.now();
+                const wait = setInterval(() => {
+                    if (audioCtx.state === 'running' && pianoSamplesLoaded) { clearInterval(wait); start(); }
+                    else if (performance.now() - asked > 500) clearInterval(wait);
+                }, 15);
+            }
+
+            /* ── Song State ── */
+            let songNotes = [];
+            let songPlaying = false;
+            let songStartTime = 0;
+            let currentNoteIdx = 0;
+            let score = { hit: 0, miss: 0, total: 0 };
+            let hitFlashes = [];  // { x, y, t, note }
+
+            // Fingertip landmark indices
+            const FINGERTIPS = [4, 8, 12, 16, 20];
+            const FINGER_NAMES = ['Thumb', 'Index', 'Middle', 'Ring', 'Pinky'];
+            let lastHandResults = null;
+
+            // Note-to-finger mapping (matches ar_studio.py)
+            // Maps note letter -> { hand: 'Left'|'Right', finger: 'Thumb'|'Index'|... }
+            const NOTE_TO_FINGER = {
+                'C': { hand: 'Left', finger: 'Pinky', tipIdx: 20 },
+                'D': { hand: 'Left', finger: 'Ring', tipIdx: 16 },
+                'E': { hand: 'Left', finger: 'Middle', tipIdx: 12 },
+                'F': { hand: 'Left', finger: 'Index', tipIdx: 8 },
+                'G': { hand: 'Left', finger: 'Thumb', tipIdx: 4 },
+                'A': { hand: 'Right', finger: 'Thumb', tipIdx: 4 },
+                'B': { hand: 'Right', finger: 'Index', tipIdx: 8 },
+            };
+
+            // Reverse mapping for struck checks. Full two-hand layout:
+            //   Left  hand (pinky -> thumb): C D E F G   (octave 4)
+            //   Right hand (thumb -> pinky): A B C D E   (A,B octave 4; C,D,E octave 5)
+            // Values include octave so the right hand continues the scale upward.
+            const FINGER_TO_NOTE = {
+                'Left_20': 'C4',
+                'Left_16': 'D4',
+                'Left_12': 'E4',
+                'Left_8': 'F4',
+                'Left_4': 'G4',
+                'Right_4': 'A4',
+                'Right_8': 'B4',
+                'Right_12': 'C5',
+                'Right_16': 'D5',
+                'Right_20': 'E5'
+            };
+
+            // Per-finger detection easing. Ring and pinky (and the right hand in general)
+            // flex less and are tracked more noisily, so they need lower velocity/distance
+            // thresholds to register consistently. <1 = easier to trigger.
+            const FINGER_EASE = {
+                'Left_4': 1.0, 'Left_8': 1.0, 'Left_12': 0.95, 'Left_16': 0.8, 'Left_20': 0.7,
+                'Right_4': 1.0, 'Right_8': 0.95, 'Right_12': 0.75, 'Right_16': 0.6, 'Right_20': 0.5
+            };
+
+            // Three pitch bands across the camera view (top = high, bottom = low).
+            const OCTAVE_ZONES = ['HIGH ×2', 'MIDDLE ×1', 'LOW ×½'];
+
+            // On-video drawing kit. Neo-brutalist like the rest of the interface: flat
+            // fills from the six tokens, 3px black outlines, hard offset shadows, no
+            // blur. A black-outlined shape also reads over ANY camera feed, bright or dark.
+            const C = { paper: '#fbf6ea', ink: '#3a3633', yellow: '#ffdf6b', pink: '#ff8fa9', blue: '#74a9ff', green: '#63d490' };
+            const FONT = {
+                mono: (px) => `700 ${px}px "Space Mono", "Courier New", monospace`,
+                display: (px) => `400 ${px}px "Archivo Black", "Arial Black", sans-serif`,
+            };
+            const BW = 2; // border weight, same as --bw
+
+            /** A bordered block, optionally with a hard offset shadow. */
+            function block(x, y, w, h, fill, shadow = 0) {
+                if (shadow) { ctx.fillStyle = C.ink; ctx.fillRect(x + shadow, y + shadow, w, h); }
+                ctx.fillStyle = fill;
+                ctx.fillRect(x, y, w, h);
+                ctx.lineWidth = BW;
+                ctx.strokeStyle = C.ink;
+                ctx.strokeRect(x, y, w, h);
+            }
+
+            /** A mono label on a bordered block. (x, y) is its top-left, or top-centre if centred. */
+            function tag(text, x, y, fill, { center = false, px = 11, shadow = 0 } = {}) {
+                ctx.font = FONT.mono(px);
+                const w = Math.ceil(ctx.measureText(text).width) + px * 1.3;
+                const h = Math.round(px * 2);
+                const left = center ? x - w / 2 : x;
+                block(left, y, w, h, fill, shadow);
+                ctx.fillStyle = C.ink;
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(text, left + px * 0.65, y + h / 2 + 1);
+                return w;
+            }
+
+            /** A circle with the standard black outline. */
+            function disc(x, y, r, fill, weight = BW) {
+                ctx.beginPath();
+                ctx.arc(x, y, r, 0, Math.PI * 2);
+                ctx.fillStyle = fill;
+                ctx.fill();
+                ctx.lineWidth = weight;
+                ctx.strokeStyle = C.ink;
+                ctx.stroke();
+            }
+
+function noteToZoneIndex(noteStr) {
+                const idx = PIANO_NOTES.indexOf(noteStr);
+                if (idx >= 0) return idx;
+                const m = noteStr.match(/^([A-G]#?)(\d+)$/i);
+                if (!m) return -1;
+                const target = m[1] + m[2];
+                for (let i = 0; i < PIANO_NOTES.length; i++) {
+                    if (PIANO_NOTES[i] === target) return i;
+                }
+                const semi = { 'C': 0, 'C#': 1, 'D': 2, 'D#': 3, 'E': 4, 'F': 5, 'F#': 6, 'G': 7, 'G#': 8, 'A': 9, 'A#': 10, 'B': 11 };
+                const midiNum = (parseInt(m[2]) + 1) * 12 + (semi[m[1]] || 0);
+                const firstMidi = 48; // C3
+                return Math.max(0, Math.min(PIANO_NOTES.length - 1, midiNum - firstMidi));
+            }
+
+            async function startSong() {
+                if (!songNotes.length) return;
+                await initAudio(); // unlock AudioContext first
+                await loadPianoSamples(); // then ensure samples are ready
+                songPlaying = true;
+                songStartTime = performance.now();
+                currentNoteIdx = 0;
+                score = { hit: 0, miss: 0, total: 0 };
+                updateScoreDisplay();
+                hitFlashes = [];
+                startBtn.textContent = 'Stop';
+                startBtn.classList.add('is-playing');
+            }
+
+            function updateScoreDisplay() {
+                const el = document.getElementById('scoreDisplay');
+                if (!el) return;
+                if (!songPlaying && score.hit === 0) { el.textContent = ''; return; }
+                el.textContent = `${score.hit} / ${songNotes.length} notes`;
+            }
+
+            function stopSong() {
+                const finished = songPlaying && songNotes.length > 0 && currentNoteIdx >= songNotes.length;
+                songPlaying = false;
+                currentNoteIdx = 0;
+                hitFlashes = [];
+                startBtn.textContent = 'Start song';
+                startBtn.classList.remove('is-playing');
+                if (finished) setStatus('Song done. Take a bow.');
+            }
+
+            /* ── Canvas sizing ── */
+            // Size the camera frame to the largest 4:3 box that fits its column, then
+            // match the canvas buffer to it. 4:3 matches the 960x720 webcam, so the
+            // video fills with no crop and the hand-landmark dots map onto the fingers.
+            // The frame itself is sized in CSS (harmonic.css: the largest box of the
+            // camera's aspect ratio that fits). Here we only keep the canvas BUFFER
+            // matched to it, at device resolution so text and rings stay crisp.
+            const cameraFrame = canvasEl.parentElement; // .cam-frame
+            let dpr = 1;
+            function sizeCamera() {
+                const r = cameraFrame.getBoundingClientRect();
+                dpr = Math.min(window.devicePixelRatio || 1, 2);
+                canvasEl.width = Math.max(1, Math.round(r.width * dpr));
+                canvasEl.height = Math.max(1, Math.round(r.height * dpr));
+            }
+            new ResizeObserver(sizeCamera).observe(cameraFrame);
+            sizeCamera();
+
+            /* ── Draw: pitch bands, the next note, the hand skeleton, hits ──
+               Everything is drawn in CSS pixels (the context is scaled by `dpr`) with
+               the kit above: flat fills, black outlines, hard shadows. */
+            const HAND_BONES = [
+                [0, 1], [1, 2], [2, 3], [3, 4],
+                [0, 5], [5, 6], [6, 7], [7, 8],
+                [0, 9], [9, 10], [10, 11], [11, 12],
+                [0, 13], [13, 14], [14, 15], [15, 16],
+                [0, 17], [17, 18], [18, 19], [19, 20],
+                [5, 9], [9, 13], [13, 17]
+            ];
+
+            function drawFrame() {
+                requestAnimationFrame(drawFrame);
+                const cw = canvasEl.width / dpr, ch = canvasEl.height / dpr;
+                if (!cw || !ch) return;
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                ctx.clearRect(0, 0, cw, ch);
+                ctx.setLineDash([]);
+                ctx.lineCap = 'butt';
+                const t = performance.now();
+
+                // Band Mode: a green bar slams across the top each time a bandmate plays
+                if (t - remoteFlashAt < 160) {
+                    ctx.fillStyle = C.green;
+                    ctx.fillRect(0, 0, cw, 10);
+                    ctx.fillStyle = C.ink;
+                    ctx.fillRect(0, 10, cw, BW);
+                }
+
+                // ========== PITCH BANDS (top = high, bottom = low) ==========
+                const zoneH = ch / 3;
+                for (let z = 0; z < 3; z++) {
+                    if (z < 2) { // a black rule with paper dashes: visible on any background
+                        const y = Math.round((z + 1) * zoneH);
+                        ctx.fillStyle = C.ink;
+                        ctx.fillRect(0, y - 2, cw, 5);
+                        ctx.strokeStyle = C.paper;
+                        ctx.lineWidth = 2;
+                        ctx.setLineDash([10, 10]);
+                        ctx.beginPath(); ctx.moveTo(0, y + 0.5); ctx.lineTo(cw, y + 0.5); ctx.stroke();
+                        ctx.setLineDash([]);
+                    }
+                    tag(OCTAVE_ZONES[z], 12, z * zoneH + 12, C.paper);
+                }
+
+                // Current target note (what to play next)
+                let targetNote = null;
+                let targetNoteLetter = null;
+                let targetFingerInfo = null;
+                if (songPlaying && currentNoteIdx < songNotes.length) {
+                    // Wait for the player to hit the note; never auto-advance or count a miss.
+                    const sn = songNotes[currentNoteIdx];
+                    if (sn) {
+                        targetNote = sn.note;
+                        // Strip numbers and fold sharps/flats (e.g. F# -> F) to the closest playable finger
+                        targetNoteLetter = sn.note.replace(/[\d]/g, '').toUpperCase();
+                        if (targetNoteLetter.includes('#') || targetNoteLetter.includes('B')) {
+                            targetNoteLetter = targetNoteLetter[0]; // Naive fallback: F# plays as F
+                        }
+                        targetFingerInfo = NOTE_TO_FINGER[targetNoteLetter] || null;
+                    }
+                }
+
+                // ========== NEXT NOTE CARD (top centre) ==========
+                if (targetNote && targetFingerInfo) {
+                    const w = 250, h = 76, x = Math.round(cw / 2 - w / 2), y = 14;
+                    block(x, y, w, h, C.yellow, 6);
+                    ctx.fillStyle = C.ink;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'alphabetic';
+                    ctx.font = FONT.display(32);
+                    ctx.fillText(('PLAY ' + targetNote).toUpperCase(), cw / 2, y + 40);
+                    ctx.font = FONT.mono(11);
+                    ctx.fillText((targetFingerInfo.hand + ' hand / ' + targetFingerInfo.finger).toUpperCase(), cw / 2, y + 60);
+                }
+
+                // ========== HANDS ==========
+                if (lastHandResults && lastHandResults.multiHandLandmarks) {
+                    for (let h = 0; h < lastHandResults.multiHandLandmarks.length; h++) {
+                        const lm = lastHandResults.multiHandLandmarks[h];
+                        const userHand = results_cache_handedness[h] || 'Right';
+
+                        // skeleton: a paper line inside a black one
+                        const bones = () => {
+                            ctx.beginPath();
+                            HAND_BONES.forEach(([a, b]) => {
+                                ctx.moveTo(lm[a].x * cw, lm[a].y * ch);
+                                ctx.lineTo(lm[b].x * cw, lm[b].y * ch);
+                            });
+                            ctx.stroke();
+                        };
+                        ctx.lineCap = 'round';
+                        ctx.strokeStyle = C.ink; ctx.lineWidth = 6; bones();
+                        ctx.strokeStyle = C.paper; ctx.lineWidth = 2; bones();
+                        ctx.lineCap = 'butt';
+
+                        // fingertips, with the EXPECTED finger called out
+                        FINGERTIPS.forEach((fi, idx) => {
+                            const px = lm[fi].x * cw;
+                            const py = lm[fi].y * ch;
+
+                            const isExpectedFinger = targetFingerInfo &&
+                                targetFingerInfo.hand === userHand &&
+                                targetFingerInfo.tipIdx === fi;
+
+                            if (isExpectedFinger) {
+                                // a green target that knocks twice a second (hard steps, no easing)
+                                const big = Math.floor(t / 250) % 2 === 0;
+                                disc(px, py, big ? 22 : 17, C.green, 4);
+                                disc(px, py, 6, C.ink, 0.01);
+                                tag((targetNote + ' / ' + FINGER_NAMES[idx]).toUpperCase(), px, py - 58, C.green, { center: true, shadow: 4 });
+                            } else {
+                                disc(px, py, 6.5, C.paper);
+                            }
+                        });
+                    }
+                }
+
+                // ========== HIT FLASHES: a black-and-green ring punching outward ==========
+                hitFlashes = hitFlashes.filter(f => {
+                    const age = t - f.t;
+                    if (age > 420) return false;
+                    const p = age / 420;
+                    const radius = 18 + (1 - Math.pow(1 - p, 3)) * 58;
+                    ctx.beginPath();
+                    ctx.arc(f.x, f.y, radius, 0, Math.PI * 2);
+                    ctx.strokeStyle = C.ink; ctx.lineWidth = 9 * (1 - p) + 3; ctx.stroke();
+                    ctx.strokeStyle = C.green; ctx.lineWidth = 5 * (1 - p) + 1; ctx.stroke();
+                    if (p < 0.7) tag(String(f.note).toUpperCase(), f.x, f.y - radius - 30, C.paper, { center: true, px: 13 });
+                    return true;
+                });
+
+                // Player-mode hint: nothing plays until a song is started.
+                if (MODE === 'player' && !songPlaying) {
+                    // centre of the middle band, just below its tag so the two never collide
+                    tag('PICK A SONG, THEN HIT START', cw / 2, ch / 2 + 4, C.yellow, { center: true, px: 13, shadow: 5 });
+                }
+
+                // Song ended
+                if (songPlaying && currentNoteIdx >= songNotes.length) {
+                    stopSong();
+                }
+            }
+            requestAnimationFrame(drawFrame);
+
+/* ── Hand Tracking ──
+               Strike detection uses fingertip motion RELATIVE TO THE HAND (the finger's
+               knuckle / MCP joint). Moving the whole hand toward/away from the camera, or
+               up and down, moves the tip and knuckle together, so the relative position
+               barely changes and no note fires. A real key-press curls the fingertip down
+               relative to the knuckle. We also require a minimum travel distance, re-arm
+               only after the finger lifts, and ignore frames where many fingers move at
+               once (that's whole-hand motion, not a deliberate press). */
+            const TIP_TO_MCP = { 4: 2, 8: 5, 12: 9, 16: 13, 20: 17 };
+            const MIN_STRIKE_DISTANCE = 0.035; // min downward travel relative to hand (normalized)
+            const REARM_VELOCITY = 0.04;       // upward relative speed needed to re-arm a finger
+            const MAX_SIMULTANEOUS_FINGERS = 2; // more than this in one frame = whole-hand motion
+
+            let prevRelY = {};   // last relative (tip - knuckle) y, per finger
+            let armed = {};      // finger is lifted and ready to strike
+            let armRelY = {};    // relative y captured at the top of the lift (distance baseline)
+            let cooldowns = {}, prevTime = 0;
+            let results_cache_handedness = []; // cache handedness labels for draw
+
+            // Called by HarmonicTracker (hand-tracker.js) once per tracked camera frame
+            // with { multiHandLandmarks, multiHandedness, time }. It runs straight off
+            // the tracking result, not on an animation frame, so a strike is detected
+            // and sounded the moment its frame has been tracked.
+            const handleResults = (results) => {
+                lastHandResults = results;
+                // Native SelfieMode handles physical hand labeling correctly
+                results_cache_handedness = (results.multiHandedness || []).map(h => h.label || 'Right');
+                if (!results.multiHandLandmarks) return;
+                const now = performance.now();
+                // Velocities use the frame's CAPTURE time. Results reach us at uneven
+                // moments (tracking time varies); the camera's frames are evenly spaced.
+                const frameTime = typeof results.time === 'number' ? results.time : now;
+                const dt = (frameTime - prevTime) / 1000;
+                prevTime = frameTime;
+                if (dt <= 0 || dt > 0.5) return;
+                const threshold = parseFloat(sensitivitySlider.value);
+
+                // ---- Pass 1: collect strike candidates from hand-relative motion ----
+                const candidates = [];
+                for (let h = 0; h < results.multiHandLandmarks.length; h++) {
+                    const lm = results.multiHandLandmarks[h];
+                    const side = results.multiHandedness[h]?.label || 'Right';
+
+                    FINGERTIPS.forEach((fi) => {
+                        const key = side + '_' + fi;
+                        const mcp = TIP_TO_MCP[fi];
+                        // Fingertip vertical position relative to its own knuckle.
+                        const relY = lm[fi].y - lm[mcp].y;
+                        const prev = prevRelY[key];
+                        prevRelY[key] = relY;
+                        if (prev === undefined) { armed[key] = true; armRelY[key] = relY; return; }
+
+                        const relVel = (relY - prev) / dt;
+
+                        // Per-finger easing: ring/pinky/right-hand fingers need lower
+                        // thresholds to register consistently.
+                        const ease = FINGER_EASE[key] || 1.0;
+                        const velThreshold = threshold * ease;
+                        const minDistance = MIN_STRIKE_DISTANCE * ease;
+
+                        // Finger lifting back up -> re-arm and reset the distance baseline
+                        if (relVel < -(REARM_VELOCITY * ease)) {
+                            armed[key] = true;
+                            armRelY[key] = relY;
+                        }
+                        // While armed, keep the highest point (smallest relY) as launch baseline
+                        if (armed[key] && relY < (armRelY[key] != null ? armRelY[key] : relY)) {
+                            armRelY[key] = relY;
+                        }
+
+                        if (!armed[key]) return;
+                        if (now < (cooldowns[key] || 0)) return;
+                        if (relVel <= velThreshold) return; // not a fast-enough downward flick
+
+                        const distance = relY - (armRelY[key] != null ? armRelY[key] : relY);
+                        if (distance < minDistance) return; // didn't travel far enough
+
+                        candidates.push({ key, fi, side, lm, relVel, distance });
+                    });
+                }
+
+                if (candidates.length === 0) return;
+                // Whole-hand guard: many fingers crossing the threshold together is the
+                // hand entering/leaving frame, not deliberate presses -> ignore the frame.
+                if (candidates.length > MAX_SIMULTANEOUS_FINGERS) return;
+
+                // ---- Pass 2: fire the candidate strikes ----
+                candidates.forEach(c => {
+                    armed[c.key] = false;          // disarm until the finger lifts again
+                    cooldowns[c.key] = now + 140;  // debounce (the finger must also lift to re-arm)
+                    fireStrike(c, now, threshold);
+                });
+            };
+            // Expose the callback so the tracking driver at the end of <body> can call it.
+            window.__handleResults = handleResults;
+
+            function fireStrike(c, now, threshold) {
+                const { key, fi, lm, relVel } = c;
+                const mappedNote = FINGER_TO_NOTE[key]; // e.g. 'C4', 'C5'
+                if (!mappedNote) return; // Unmapped fingers do nothing
+                const baseLetter = mappedNote.replace(/[\d]/g, '').toUpperCase();
+
+                let finalNoteToPlay = mappedNote; // already includes the octave
+                let finalSpeedMult = 1.0;
+
+                // Map vertical zone to playback speed (2x, 1x, 0.5x) for FREE PLAY
+                const tipY = lm[fi].y;
+                if (tipY < 0.33) { finalSpeedMult = 2.0; } // High
+                else if (tipY > 0.66) { finalSpeedMult = 0.5; } // Low
+
+                // Free-play any mapped note until a song is started; once a song
+                // is playing, the strict guided check below takes over.
+                if (songPlaying && currentNoteIdx < songNotes.length) {
+                    const sn = songNotes[currentNoteIdx];
+                    let expectedLetter = sn.note.replace(/[\d]/g, '').toUpperCase();
+                    if (expectedLetter.includes('#') || expectedLetter.includes('B')) {
+                        expectedLetter = expectedLetter[0]; // naive fallback
+                    }
+
+                    // STRICT: only the correct finger/note makes a sound.
+                    if (baseLetter !== expectedLetter) {
+                        return; // wrong note -> no sound, no advance
+                    }
+
+                    // FORCE EXACT NOTE PLAYBACK from the song (proper sharps/octave)
+                    finalNoteToPlay = sn.note.toUpperCase();
+                    if (!/\d/.test(finalNoteToPlay)) {
+                        finalNoteToPlay += '4'; // Add default Octave 4 if missing
+                    }
+                    finalSpeedMult = 1.0;
+                }
+
+                const finalVel = Math.min(1.0, Math.abs(relVel) / (threshold * 3));
+                playNote(finalNoteToPlay, finalVel, finalSpeedMult);
+
+                // Jam Session Broadcast
+                if (window.jamSessionManager && window.jamSessionManager.connected) {
+                    window.jamSessionManager.sendNote(finalNoteToPlay, finalVel);
+                }
+
+                const px = lm[fi].x * canvasEl.width / dpr;   // CSS px, like the rest of drawFrame
+                const py = lm[fi].y * canvasEl.height / dpr;
+                if (songPlaying) {
+                    hitFlashes.push({ x: px, y: py, t: now, note: finalNoteToPlay });
+                }
+
+                checkHit(finalNoteToPlay);
+            }
+
+            function checkHit(playedNote) {
+                if (!songPlaying || currentNoteIdx >= songNotes.length) return;
+                const sn = songNotes[currentNoteIdx];
+                if (!sn) return;
+
+                // Strict Note Checking based on Letter Mapping (ignoring Octave/Sharps for hits)
+                // Since the user is physically limited to exactly 1 finger per note letter using Fixed Mapping,
+                // we check if the base letter they played matches the base letter of the expected song note.
+
+                let targetLetter = sn.note.replace(/[\d]/g, '').toUpperCase();
+                if (targetLetter.includes('#') || targetLetter.includes('B')) {
+                    targetLetter = targetLetter[0]; // Convert F# -> F
+                }
+                const playedLetter = playedNote.replace(/[\d]/g, '').toUpperCase();
+
+                if (targetLetter === playedLetter) {
+                    score.hit++;
+                    currentNoteIdx++;
+                    updateScoreDisplay();
+                } else {
+                    // Ignore wrong notes entirely
+                }
+            }
+
+            /* ── Camera retry overlay helpers ──
+               Opening the camera and tracking hands is HarmonicTracker's job
+               (hand-tracker.js), driven by the small script at the end of <body>. That
+               script calls these overlay helpers and window.__handleResults, so they
+               are exposed on window. The "Enable camera" retry button re-runs its start
+               function (window.__startHarmonicCamera); auto-start happens there too. */
+            const camOverlay = document.getElementById('camOverlay');
+            const camOverlayTitle = document.getElementById('camOverlayTitle');
+            const camOverlayHelp = document.getElementById('camOverlayHelp');
+            const camRetryBtn = document.getElementById('camRetryBtn');
+
+            function showCamOverlay(denied) {
+                if (camOverlayTitle) camOverlayTitle.textContent = denied
+                    ? 'Camera\'s blocked.'
+                    : 'No camera, no piano.';
+                if (camOverlayHelp) camOverlayHelp.textContent = denied
+                    ? 'Hit the camera icon in the address bar, pick Allow, then press the button.'
+                    : "We couldn't reach your webcam. Check it's connected, then try again.";
+                if (camOverlay) camOverlay.classList.add('is-visible');
+                HarmonicUI.setStatus('blocked');
+            }
+            function hideCamOverlay() {
+                if (camOverlay) camOverlay.classList.remove('is-visible');
+            }
+            // Expose so the tracking driver can reuse the page's overlay UI.
+            window.__showCamOverlay = showCamOverlay;
+            window.__hideCamOverlay = hideCamOverlay;
+
+            // "Enable camera", a genuine user gesture: re-prompts for the webcam
+            // and (via the document-level listeners below) also unlocks audio.
+            if (camRetryBtn) {
+                camRetryBtn.addEventListener('click', () => {
+                    initAudio();                                 // gesture-based audio unlock
+                    if (camRetryBtn) camRetryBtn.setAttribute('disabled', '');
+                    const startFn = window.__startHarmonicCamera;
+                    Promise.resolve(startFn && startFn())        // re-run the Tasks start path
+                        .finally(() => { if (camRetryBtn) camRetryBtn.removeAttribute('disabled'); });
+                });
+            }
+
+            /* ── Start / Stop ── */
+            startBtn.addEventListener('click', async () => {
+                await initAudio(); // Ensure AudioContext is active on user interaction
+                if (songPlaying) { stopSong(); return; }
+                const sid = songSelect.value;
+                if (!sid) {
+                    // no modal: point at the control that needs attention
+                    setStatus('Choose a song first', { alert: true });
+                    songSelect.classList.remove('is-nudge');
+                    void songSelect.offsetWidth; // restart the nudge animation
+                    songSelect.classList.add('is-nudge');
+                    songSelect.focus();
+                    return;
+                }
+                if (songNotes.length > 0) { startSong(); return; }
+                fetchSongAndStart(sid);
+            });
+
+            // Built-in songs are baked into /songs and served statically (no backend
+            // needed). Fall back to the music_api (:8766) only for songs it alone has,
+            // e.g. ones just uploaded this session.
+            function fetchSongAndStart(songId) {
+                setStatus('Loading song', { sticky: true });
+                const id = encodeURIComponent(songId);
+                fetch('../songs/' + id + '.json')
+                    .then(r => r.ok ? r.json() : Promise.reject())
+                    .catch(() => fetch(API + '/api/songs/' + id).then(r => {
+                        if (!r.ok) throw new Error('Song not found');
+                        return r.json();
+                    }))
+                    .then(data => {
+                        if (data && data.notes && data.notes.length) {
+                            songNotes = data.notes;
+                            setStatus(songNotes.length + ' notes loaded');
+                            startSong();
+                        } else {
+                            setStatus('No notes in that song', { alert: true });
+                        }
+                    })
+                    .catch(() => setStatus('Song not found', { alert: true }));
+            }
+
+            songSelect.addEventListener('change', () => {
+                if (songPlaying) stopSong();
+                songNotes = [];
+            });
+
+            /* ── Add any extra songs from the static catalogue (no backend needed) ── */
+            // Proper titles for the bundled imports; anything else gets its id tidied up.
+            const SONG_TITLES = {
+                '7_Years_-_Lukas_Graham_-_Pianoitall_mid': '7 Years (Lukas Graham)',
+                'As_it_was_by_Harry_Styles': 'As It Was (Harry Styles)',
+                'Don_t_Stop_Believin__-_Journey_mid': "Don't Stop Believin' (Journey)",
+            };
+            const songTitle = id => SONG_TITLES[id] ||
+                id.replace(/_mid$/i, '').replace(/[_\s]+/g, ' ').trim().replace(/^./, c => c.toUpperCase());
+
+            fetch('../songs/index.json')
+                .then(r => r.json())
+                .then(data => {
+                    (data.songs || []).forEach(id => {
+                        if (songSelect.querySelector('option[value="' + id + '"]')) return;
+                        const opt = document.createElement('option');
+                        opt.value = id;
+                        opt.textContent = songTitle(id);
+                        songSelect.appendChild(opt);
+                    });
+                })
+                .catch(() => { });
+
+            /* ── MIDI Upload with Track Picker ── */
+            midiUploadBtn.addEventListener('click', () => midiFileInput.click());
+
+            midiFileInput.addEventListener('change', () => {
+                const file = midiFileInput.files[0];
+                if (!file) return;
+                setStatus('Reading MIDI', { sticky: true });
+                const fd = new FormData();
+                fd.append('file', file);
+
+                fetch(API + '/api/upload-midi', { method: 'POST', body: fd })
+                    .then(function (r) {
+                        return r.text().then(function (text) {
+                            var data;
+                            try { data = text ? JSON.parse(text) : {}; } catch (e) {
+                                throw new Error(r.status + ' ' + (r.statusText || '') + (text ? ': ' + text.slice(0, 80) : ''));
+                            }
+                            if (!r.ok) {
+                                var msg = (data && (data.detail || data.error)) || r.statusText || 'Server error';
+                                throw new Error(typeof msg === 'string' ? msg : (msg.message || JSON.stringify(msg)));
+                            }
+                            return data;
+                        });
+                    })
+                    .then(function (data) {
+                        if (data.error) { setStatus(data.error, { alert: true, sticky: true }); return; }
+                        // music_api returns { notes, song_id, note_count, ... }
+                        if (data.notes && data.notes.length) {
+                            songNotes = data.notes;
+                            setStatus(data.note_count + ' notes loaded, press Start');
+                            // Add to dropdown
+                            let opt = songSelect.querySelector('option[value="' + data.song_id + '"]');
+                            if (!opt) {
+                                opt = document.createElement('option');
+                                opt.value = data.song_id;
+                                opt.textContent = (data.song_id || 'imported').replace(/_/g, ' ') + ' (MIDI)';
+                                songSelect.appendChild(opt);
+                            }
+                            songSelect.value = data.song_id;
+                        } else {
+                            setStatus('No notes found in that MIDI', { alert: true });
+                        }
+                    })
+                    .catch(function (e) {
+                        // "Failed to fetch" = the optional song server (music_api.py, :8766) isn't running
+                        const offline = !e || !e.message || /failed to fetch|networkerror|load failed/i.test(e.message);
+                        setStatus(offline ? 'MIDI import needs the song server' : 'Upload failed: ' + e.message, { alert: true, sticky: true });
+                    });
+                midiFileInput.value = '';
+            });
+
+            function showTrackPicker(midiId, tracks) {
+                trackList.innerHTML = '';
+                if (!tracks.length) { midiStatus.textContent = 'No tracks found'; return; }
+                const hasPiano = tracks.some(t => t.family === 'piano' && !t.is_drum);
+
+                if (hasPiano) {
+                    const pb = document.createElement('button');
+                    pb.style.cssText = 'width:100%;text-align:left;padding:12px 16px;background:rgba(0,255,136,0.15);border:1px solid rgba(0,255,136,0.4);border-radius:10px;color:#fff;cursor:pointer;font-size:0.9rem;';
+                    const pc = tracks.filter(t => t.family === 'piano' && !t.is_drum).reduce((s, t) => s + t.note_count, 0);
+                    pb.innerHTML = '<strong style="color:#00ff88;">Piano Only</strong><br><span style="color:#888;font-size:0.8rem;">Extracts piano tracks (' + pc + ' notes)</span>';
+                    pb.onclick = () => extractAndLoad(midiId, { family: 'piano' });
+                    trackList.appendChild(pb);
+                }
+
+                const ab = document.createElement('button');
+                ab.style.cssText = 'width:100%;text-align:left;padding:12px 16px;background:rgba(0,255,136,0.08);border:1px solid rgba(0,255,136,0.2);border-radius:10px;color:#fff;cursor:pointer;font-size:0.9rem;';
+                const ac = tracks.reduce((s, t) => s + (t.is_drum ? 0 : t.note_count), 0);
+                ab.innerHTML = '<strong style="color:#00ff88;">All Tracks</strong><br><span style="color:#888;font-size:0.8rem;">All instruments (' + ac + ' notes)</span>';
+                ab.onclick = () => extractAndLoad(midiId, {});
+                trackList.appendChild(ab);
+
+                tracks.forEach(t => {
+                    if (t.is_drum) return;
+                    const btn = document.createElement('button');
+                    btn.style.cssText = 'width:100%;text-align:left;padding:12px 16px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:10px;color:#fff;cursor:pointer;font-size:0.9rem;';
+                    const badge = t.family === 'piano' ? ' <span style="color:#00ff88;">[Piano]</span>' : '';
+                    btn.innerHTML = '<strong>' + (t.name || t.program_name) + badge + '</strong><br><span style="color:#888;font-size:0.8rem;">' + t.program_name + ', ' + t.note_count + ' notes</span>';
+                    btn.onclick = () => extractAndLoad(midiId, { track_index: t.index });
+                    trackList.appendChild(btn);
+                });
+                trackPickerOverlay.style.display = 'flex';
+            }
+
+            trackPickerCancel.addEventListener('click', () => {
+                trackPickerOverlay.style.display = 'none';
+                midiStatus.textContent = '';
+            });
+
+            function extractAndLoad(midiId, opts) {
+                trackPickerOverlay.style.display = 'none';
+                midiStatus.textContent = 'Extracting...';
+                fetch(API + '/api/extract-track', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ midi_id: midiId, ...opts }),
+                })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (!data.success) { midiStatus.textContent = 'Error: ' + (data.error || ''); return; }
+                        songNotes = data.notes;
+                        midiStatus.textContent = data.note_count + ' notes loaded';
+                        let opt = songSelect.querySelector('option[value="' + data.song_id + '"]');
+                        if (!opt) {
+                            opt = document.createElement('option');
+                            opt.value = data.song_id;
+                            opt.textContent = (data.song_id || 'imported').replace(/_/g, ' ') + ' (MIDI)';
+                            songSelect.appendChild(opt);
+                        }
+                        songSelect.value = data.song_id;
+                    })
+                    .catch(() => { midiStatus.textContent = 'Extract failed'; });
+            }
+
+            // Robust audio unlock: browsers only let an AudioContext produce sound
+            // after a real user gesture ON the page. Allowing the camera prompt does
+            // NOT count, so listen for several gesture types and keep trying until
+            // the context is actually running.
+            async function unlockAudio() {
+                await initAudio();
+                if (audioCtx && audioCtx.state === 'running') {
+                    ['pointerdown', 'mousedown', 'touchstart', 'keydown', 'click'].forEach(
+                        ev => document.removeEventListener(ev, unlockAudio)
+                    );
+                    console.log('[DEBUG] AudioContext unlocked (running)');
+                }
+            }
+            ['pointerdown', 'mousedown', 'touchstart', 'keydown', 'click'].forEach(
+                ev => document.addEventListener(ev, unlockAudio)
+            );
+        });
+    </script>
+
+    <!-- Camera + hand tracking. HarmonicTracker (hand-tracker.js) opens the camera, runs
+         the model in a worker on frames straight from the camera track, and calls the
+         page's note detection (window.__handleResults) once per tracked frame. -->
+    <script>
+        (function () {
+            const video = document.getElementById('playerVideo');
+
+            async function startCamera() {
+                try {
+                    if (window.__hideCamOverlay) window.__hideCamOverlay();
+                    HarmonicUI.setStatus('loading');
+                    await HarmonicTracker.start(video, (results) => {
+                        if (window.__handleResults) window.__handleResults(results);
+                    });
+                    if (window.__hideCamOverlay) window.__hideCamOverlay(); // the live, mirrored feed is showing
+                    HarmonicUI.setStatus('live');
+                } catch (e) {
+                    console.error('[CV] camera/init failed', e);
+                    const denied = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError' || e.name === 'PermissionDeniedError');
+                    if (window.__showCamOverlay) window.__showCamOverlay(denied);
+                }
+            }
+
+            // Expose so the "Enable camera" retry button can re-run the real start path.
+            window.__startHarmonicCamera = startCamera;
+            // Auto-start once the page's own script has set up its handlers.
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startCamera);
+            else startCamera();
+        })();
+    </script>
+</body>
+
+</html>

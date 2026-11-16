@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Drums · Symphony</title>
+    <meta name="theme-color" content="#3a3633">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+    <!-- Neo-brutalist type: Archivo Black (display) / Space Grotesk (body) / Space Mono (labels) -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap"
+        rel="stylesheet">
+    <!-- Shared player design system (neo-brutalist; same tokens as the studio) -->
+    <link rel="stylesheet" href="harmonic.css">
+    </head>
+
+<body class="hm hm--drums" data-cam="loading">
+    <!-- Rail: back · title · status. (.mode-header is kept: the jam badge is appended to it) -->
+    <header class="rail mode-header">
+        <a href="/?studio=1" class="rail__back" data-leave>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                stroke-linejoin="round" aria-hidden="true">
+                <path d="M15 18l-6-6 6-6" />
+            </svg>
+            <span>Studio</span>
+        </a>
+        <div class="rail__title">
+            <span class="rail__no">No. 03</span>
+            <h1 class="rail__name">Drums</h1>
+            <span class="rail__mode">a four-pad kit</span>
+        </div>
+        <div class="rail__meta">
+            <div class="status-badge" id="camStatus">
+                <i class="status-dot" id="cam-dot"></i>
+                <span id="cam-label">Waking camera</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Pad legend (built by the engine) + how to play -->
+    <div class="controls">
+        <div class="legend-bar" id="legend-bar"></div>
+        <p class="note controls__push">Poke a pad with a finger. Hold it there to repeat.</p>
+    </div>
+
+    <!-- Stage: live camera + pads -->
+    <main class="stage">
+        <div class="cam-col">
+            <!-- .cam-frame must stay the direct parent of #overlay (the engine sizes the canvas from it) -->
+            <div class="cam-frame" id="cam-area">
+                <video id="cam-video" playsinline muted></video>
+                <canvas id="overlay"></canvas>
+                <div class="cam-loading" aria-hidden="true">Waking the camera</div>
+                <div class="finger-info" id="finger-info"></div>
+                <!-- The engine's own start path hangs off this button. It is clicked for the
+                     visitor (auto-start, and again by "Enable camera"), so it stays hidden. -->
+                <div class="start-overlay" id="start-overlay">
+                    <button id="start-btn" type="button">Start camera</button>
+                </div>
+                <!-- Camera refused / unavailable -->
+                <div class="cam-overlay deny-overlay" id="deny-overlay" role="alertdialog" aria-modal="true"
+                    aria-labelledby="deny-title">
+                    <div class="cam-overlay__card">
+                        <span class="cam-overlay__eyebrow">Camera's off</span>
+                        <h2 id="deny-title" class="cam-overlay__title">No camera, no drums.</h2>
+                        <p class="cam-overlay__help">We need your webcam to follow your fingers. Allow camera
+                            access, then press the button.</p>
+                        <button id="deny-retry-btn" class="btn btn--primary btn--lg" type="button">Enable
+                            camera</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- hand-tracker.js first: it starts loading the tracking model immediately -->
+    <script src="hand-tracker.js"></script>
+    <script src="harmonic-ui.js"></script>
+    <script src="jam-core.js"></script>
+    <script src="finger-drums-engine.js"></script>
+    <script>
+        // ===== Capture any AudioContext the page/engine creates (no new audio graph) =====
+        // We only record instances so the first-gesture unlock can .resume() the SAME
+        // contexts the engine owns, we never build a duplicate audio graph here.
+        (function () {
+            var liveAudioContexts = window.__liveAudioContexts = [];
+            ['AudioContext', 'webkitAudioContext'].forEach(function (name) {
+                var Native = window[name];
+                if (typeof Native !== 'function' || Native.__patchedForUnlock) return;
+                function Patched() {
+                    var ctx = new (Function.prototype.bind.apply(Native, [null].concat([].slice.call(arguments))))();
+                    liveAudioContexts.push(ctx);
+                    return ctx;
+                }
+                Patched.prototype = Native.prototype;
+                Patched.__patchedForUnlock = true;
+                window[name] = Patched;
+            });
+        })();
+
+        FingerDrumsEngine.init('cam-video', 'overlay', 'start-btn', 'start-overlay', 'finger-info', 'legend-bar', null, 'cam-dot', 'cam-label');
+
+        // ===== Auto-start camera + tracking on load, with graceful denial fallback =====
+        (function () {
+            var startBtn = document.getElementById('start-btn');
+            var startOverlay = document.getElementById('start-overlay');
+            var denyOverlay = document.getElementById('deny-overlay');
+            var denyRetryBtn = document.getElementById('deny-retry-btn');
+            var camLabel = document.getElementById('cam-label');
+
+            // The engine hides #start-overlay only on a successful camera start, and resets
+            // the #start-btn label to a "denied/retry" string on failure. We watch for both.
+            function cameraIsLive() {
+                return document.body.dataset.cam === 'live';
+            }
+            function startFailed() {
+                // Engine sets one of these labels back onto the (re-enabled) button on failure.
+                return !startBtn.disabled && /denied|Retry/i.test(startBtn.textContent || '');
+            }
+
+            function triggerStart() {
+                denyOverlay.classList.remove('show');
+                // Re-run the engine's real start path (getUserMedia + loadSounds + tracking).
+                startBtn.click();
+                // Poll briefly for the engine's outcome (it's async: sounds + getUserMedia).
+                var waited = 0;
+                var iv = setInterval(function () {
+                    waited += 250;
+                    if (cameraIsLive()) {
+                        clearInterval(iv);
+                        denyOverlay.classList.remove('show');
+                    } else if (startFailed()) {
+                        clearInterval(iv);
+                        showDenial();
+                    } else if (waited >= 12000) {
+                        clearInterval(iv);
+                        if (!cameraIsLive()) showDenial();
+                    }
+                }, 250);
+            }
+
+            function showDenial() {
+                if (cameraIsLive()) return;
+                // Hide the plain start overlay; present the on-brand denial/retry overlay instead.
+                if (startOverlay) startOverlay.style.display = 'none';
+                denyOverlay.classList.add('show');
+                HarmonicUI.setStatus('blocked'); // rail label + dot, hides the loader
+            }
+
+            // Retry button = a real user gesture: re-prompts getUserMedia AND unlocks audio.
+            denyRetryBtn.addEventListener('click', triggerStart);
+
+            // Kick off automatically once the DOM is ready (no click required).
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', triggerStart);
+            } else {
+                triggerStart();
+            }
+        })();
+
+        // ===== Unlock Web Audio on the first user gesture (autoplay policy) =====
+        // Resumes the engine's own AudioContext(s), does not create a new audio graph.
+        (function () {
+            function unlockAudio() {
+                (window.__liveAudioContexts || []).forEach(function (ctx) {
+                    if (ctx && ctx.state === 'suspended' && typeof ctx.resume === 'function') {
+                        ctx.resume().catch(function () { });
+                    }
+                });
+                document.removeEventListener('pointerdown', unlockAudio);
+                document.removeEventListener('keydown', unlockAudio);
+                document.removeEventListener('touchstart', unlockAudio);
+            }
+            document.addEventListener('pointerdown', unlockAudio, { once: false });
+            document.addEventListener('keydown', unlockAudio, { once: false });
+            document.addEventListener('touchstart', unlockAudio, { once: false });
+        })();
+
+        // Band Mode: joining the room, the roster in the rail and the other players'
+        // SOUND all live in jam-core.js. This page only adds a visual cue: when another
+        // drummer hits a pad, the matching pad rings here too (silently).
+        window.addEventListener('harmonic:remote-note', function (e) {
+            if (e.detail.instrument === 'drums') FingerDrumsEngine.flashPad(e.detail.note);
+        });
+    </script>
+</body>
+
+</html>

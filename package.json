@@ -1,0 +1,24 @@
+{
+  "name": "harmonic",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Symphony — an interactive 3D studio where you explore instruments with your hands.",
+  "scripts": {
+    "songs": "node scripts/build-songs.mjs",
+    "predev": "node scripts/build-songs.mjs",
+    "dev": "vite",
+    "prebuild": "node scripts/build-songs.mjs",
+    "build": "vite build",
+    "preview": "vite preview",
+    "dev:all": "node scripts/dev-all.mjs",
+    "start:all": "node scripts/dev-all.mjs preview"
+  },
+  "dependencies": {
+    "gsap": "^3.12.5",
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "vite": "^5.4.11"
+  }
+}

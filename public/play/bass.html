@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bass · Symphony</title>
+    <meta name="theme-color" content="#3a3633">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+    <!-- Neo-brutalist type: Archivo Black (display) / Space Grotesk (body) / Space Mono (labels) -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap"
+        rel="stylesheet">
+    <!-- Shared player design system (neo-brutalist; same tokens as the studio) -->
+    <link rel="stylesheet" href="harmonic.css">
+    </head>
+
+<body class="hm hm--bass" data-cam="loading">
+    <!-- Rail: back · title · status -->
+    <header class="rail mode-header">
+        <a href="/?studio=1" class="rail__back" data-leave>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                stroke-linejoin="round" aria-hidden="true">
+                <path d="M15 18l-6-6 6-6" />
+            </svg>
+            <span>Studio</span>
+        </a>
+        <div class="rail__title">
+            <span class="rail__no">No. 01</span>
+            <h1 class="rail__name">Bass</h1>
+            <span class="rail__mode">four open strings</span>
+        </div>
+        <div class="rail__meta">
+            <div class="status-badge" id="camStatus">
+                <i class="status-dot"></i>
+                <span>Waking camera</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Strings (tap to hear one) + last pluck -->
+    <div class="controls">
+        <div class="strings" role="group" aria-label="Strings. Press one to hear it.">
+            <button type="button" class="string" id="card-0" style="--c:#ff8fa9">E2 <span
+                    class="pill-status">IDLE</span></button>
+            <button type="button" class="string" id="card-1" style="--c:#ffdf6b">A2 <span
+                    class="pill-status">IDLE</span></button>
+            <button type="button" class="string" id="card-2" style="--c:#74a9ff">D2 <span
+                    class="pill-status">IDLE</span></button>
+            <button type="button" class="string" id="card-3" style="--c:#63d490">G2 <span
+                    class="pill-status">IDLE</span></button>
+        </div>
+        <p class="note">Swipe a fingertip through a string. That's the whole trick.</p>
+        <div class="field controls__push">
+            <span class="field__label">Last</span>
+            <span class="value" id="last-pluck-text">None</span>
+        </div>
+    </div>
+
+    <!-- Stage: live camera + hand tracking (in-browser) -->
+    <main class="stage">
+        <div class="cam-col">
+            <!-- .cam-frame must stay the direct parent of #bassCanvas (canvas sizing) -->
+            <div class="cam-frame">
+                <video id="bassVideo" autoplay playsinline muted></video>
+                <canvas id="bassCanvas"></canvas>
+                <div class="cam-loading" aria-hidden="true">Waking the camera</div>
+                <!-- Camera refused / unavailable (shown on a start failure) -->
+                <div id="camOverlay" class="cam-overlay" role="alertdialog" aria-live="polite"
+                    aria-labelledby="camOverlayHeading">
+                    <div class="cam-overlay__card">
+                        <span class="cam-overlay__eyebrow">Camera's off</span>
+                        <h2 id="camOverlayHeading" class="cam-overlay__title">No camera, no bass.</h2>
+                        <p id="camOverlayHelp" class="cam-overlay__help">We need your webcam to follow your hands.
+                            Allow camera access, then press the button.</p>
+                        <button type="button" id="camEnableBtn" class="btn btn--primary btn--lg">Enable
+                            camera</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- hand-tracker.js first: it starts loading the tracking model immediately -->
+    <script src="hand-tracker.js"></script>
+    <script src="harmonic-ui.js"></script>
+    <script src="jam-core.js"></script>
+    <script>
+        // ============================================================
+        // In-browser Bass engine: MediaPipe hand tracking + Web Audio.
+        // Four open strings (E2 A2 D2 G2) run across the camera view; a
+        // note sounds when any fingertip sweeps across a string quickly
+        // enough to count as a strum. The string buttons in the control
+        // strip play the same notes by click.
+        // ============================================================
+        (function () {
+            const videoEl = document.getElementById('bassVideo');
+            const canvasEl = document.getElementById('bassCanvas');
+            const ctx = canvasEl.getContext('2d');
+
+            /* ── Audio ── */
+            let audioCtx = null, masterGain = null;
+            let bassSamplesLoaded = false;
+            const bassBuffers = {};
+            const BASS_FILES = {
+                'E2': 'Bass sounds/e2-bass.wav',
+                'A2': 'Bass sounds/a2-bass.wav',
+                'D2': 'Bass sounds/d-bass.wav',
+                'G2': 'Bass sounds/g-bass.wav'
+            };
+
+            async function initAudio() {
+                if (!audioCtx) {
+                    audioCtx = HarmonicUI.audioContext(); // asks for the smallest output buffer
+                    masterGain = audioCtx.createGain();
+                    masterGain.gain.value = 0.9;
+                    masterGain.connect(audioCtx.destination);
+                    loadBassSamples();
+                }
+                if (audioCtx.state === 'suspended') {
+                    try { await audioCtx.resume(); } catch (e) { /* ignore */ }
+                }
+            }
+
+            // Memoised so a strum that lands while the samples are still loading
+            // waits for the in-flight load instead of fetching everything again.
+            let bassSamplesPromise = null;
+            function loadBassSamples() {
+                if (!bassSamplesPromise) bassSamplesPromise = loadBassSamplesOnce();
+                return bassSamplesPromise;
+            }
+
+            async function loadBassSamplesOnce() {
+                if (bassSamplesLoaded) return;
+                await Promise.all(Object.entries(BASS_FILES).map(async ([note, url]) => {
+                    try {
+                        const r = await fetch(url);
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                        const buf = await audioCtx.decodeAudioData(await r.arrayBuffer());
+                        HarmonicUI.onset(buf); // measure the sample's dead air now, not on the first note
+                        bassBuffers[note] = buf;
+                    } catch (e) { console.error('[BASS] failed to load', note, e); }
+                }));
+                bassSamplesLoaded = true;
+            }
+            initAudio(); // create + decode up front, so the first pluck has nothing to wait for
+
+            // Synchronous on purpose: once the samples are in memory, a pluck goes from
+            // "the finger crossed the string" to source.start() inside the same task.
+            function playBass(note, vel, speed = 1.0) {
+                const start = () => {
+                    const buf = bassBuffers[note];
+                    if (!buf) return;
+                    const t = audioCtx.currentTime;
+                    const source = audioCtx.createBufferSource();
+                    source.buffer = buf;
+                    source.playbackRate.value = speed;
+
+                    // 3 ms attack: quick enough to feel immediate, long enough not to click
+                    const peak = Math.max(0.1, Math.min(vel, 1));
+                    const g = audioCtx.createGain();
+                    g.gain.setValueAtTime(0, t);
+                    g.gain.linearRampToValueAtTime(peak, t + 0.003);
+                    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.8);
+
+                    source.connect(g);
+                    g.connect(masterGain);
+                    source.start(t, HarmonicUI.onset(buf)); // skip any dead air in the recording
+                };
+
+                if (!audioCtx) initAudio();
+                if (audioCtx.state === 'running' && bassSamplesLoaded) { start(); return; }
+
+                // Not ready yet (still decoding, or sound not yet allowed before a first
+                // click). Play as soon as it is, but only within a moment of the pluck.
+                loadBassSamples();
+                audioCtx.resume().catch(() => { });
+                const asked = performance.now();
+                const wait = setInterval(() => {
+                    if (audioCtx.state === 'running' && bassSamplesLoaded) { clearInterval(wait); start(); }
+                    else if (performance.now() - asked > 500) clearInterval(wait);
+                }, 15);
+            }
+
+            // Unlock audio on first user gesture (browsers require it)
+            async function unlockAudio() {
+                await initAudio();
+                if (audioCtx && audioCtx.state === 'running') {
+                    ['pointerdown', 'mousedown', 'touchstart', 'keydown', 'click'].forEach(
+                        ev => document.removeEventListener(ev, unlockAudio));
+                    console.log('[BASS] audio unlocked');
+                }
+            }
+            ['pointerdown', 'mousedown', 'touchstart', 'keydown', 'click'].forEach(
+                ev => document.addEventListener(ev, unlockAudio));
+
+            /* ── Bass strings = horizontal lines across the screen ──
+               A note plays when any fingertip crosses a string line (strum). */
+            const FINGERTIPS = [4, 8, 12, 16, 20]; // all fingertips can strum
+            const STRINGS = [
+                // colours match the string buttons (pink, yellow, blue, green)
+                { note: 'E2', y: 0.20, color: '#ff8fa9' },
+                { note: 'A2', y: 0.40, color: '#ffdf6b' },
+                { note: 'D2', y: 0.60, color: '#74a9ff' },
+                { note: 'G2', y: 0.80, color: '#63d490' }
+            ];
+            const MIN_CROSS_VEL = 0.25;  // normalized y-units/sec needed to count as a strum
+            const STRING_COOLDOWN = 140; // ms per (finger, string) to avoid double-triggers
+
+            let prevTipY = {}, crossCooldown = {}, prevTime = 0;
+            let lastHandResults = null;
+            let stringFlash = [0, 0, 0, 0]; // perf time of last pluck per string
+
+            // Called by HarmonicTracker (hand-tracker.js) once per tracked camera frame,
+            // straight off the tracking result rather than on an animation frame
+            // ({ multiHandLandmarks, multiHandedness, time }).
+            const handleResults = results => {
+                lastHandResults = results;
+                if (!results.multiHandLandmarks) return;
+                const now = performance.now();
+                // Velocities use the frame's CAPTURE time. Results reach us at uneven
+                // moments (tracking time varies); the camera's frames are evenly spaced.
+                const frameTime = typeof results.time === 'number' ? results.time : now;
+                const dt = (frameTime - prevTime) / 1000;
+                prevTime = frameTime;
+                if (dt <= 0 || dt > 0.5) return;
+
+                for (let h = 0; h < results.multiHandLandmarks.length; h++) {
+                    const lm = results.multiHandLandmarks[h];
+                    const side = results.multiHandedness[h]?.label || 'Right';
+                    FINGERTIPS.forEach(fi => {
+                        const key = side + '_' + fi;
+                        const y = lm[fi].y;
+                        const prev = prevTipY[key];
+                        prevTipY[key] = y;
+                        if (prev === undefined) return;
+                        const vel = Math.abs(y - prev) / dt;
+                        if (vel < MIN_CROSS_VEL) return; // moving too slowly to be a strum
+
+                        for (let s = 0; s < STRINGS.length; s++) {
+                            const sy = STRINGS[s].y;
+                            // Did the fingertip cross this string line since last frame?
+                            const crossed = (prev < sy && y >= sy) || (prev > sy && y <= sy);
+                            if (!crossed) continue;
+                            const ck = key + '_' + s;
+                            if (now < (crossCooldown[ck] || 0)) continue;
+                            crossCooldown[ck] = now + STRING_COOLDOWN;
+
+                            const v = Math.min(1.0, vel / 2);
+                            playBass(STRINGS[s].note, Math.max(0.5, v), 1.0);
+                            stringFlash[s] = now;
+                            window.postMessage({
+                                type: 'notePlayed', instrument: 'bass',
+                                string: s, note: STRINGS[s].note, speed: 1.0, velocity: v
+                            }, '*');
+                            if (window.jamSessionManager && window.jamSessionManager.connected) {
+                                window.jamSessionManager.sendNote(STRINGS[s].note, v);
+                            }
+                        }
+                    });
+                }
+            };
+            // Expose so the tracking driver at the end of <body> can call it.
+            window.__handleResults = handleResults;
+
+            /* ── Draw: the four strings (they whip when plucked) + hands ──
+               Neo-brutalist, like the rest of the interface: flat colour, black
+               outlines, no blur. Drawn in CSS pixels with the context scaled by `dpr`.
+               The frame itself is sized in CSS (harmonic.css); we only keep the canvas
+               buffer matched to it. */
+            let dpr = 1;
+            function resizeCanvas() {
+                const r = canvasEl.parentElement.getBoundingClientRect();
+                dpr = Math.min(window.devicePixelRatio || 1, 2);
+                canvasEl.width = Math.max(1, Math.round(r.width * dpr));
+                canvasEl.height = Math.max(1, Math.round(r.height * dpr));
+            }
+            new ResizeObserver(resizeCanvas).observe(canvasEl.parentElement);
+            resizeCanvas();
+
+            const PAPER = '#fbf6ea', INK = '#3a3633';
+            const MONO = '700 13px "Space Mono", "Courier New", monospace';
+            const HAND_BONES = [[0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8], [0, 9], [9, 10], [10, 11], [11, 12], [0, 13], [13, 14], [14, 15], [15, 16], [0, 17], [17, 18], [18, 19], [19, 20], [5, 9], [9, 13], [13, 17]];
+
+            function draw() {
+                requestAnimationFrame(draw);
+                const cw = canvasEl.width / dpr, ch = canvasEl.height / dpr;
+                if (!cw || !ch) return;
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                ctx.clearRect(0, 0, cw, ch);
+                const now = performance.now();
+
+                STRINGS.forEach((s, i) => {
+                    const yPx = s.y * ch;
+                    const since = now - stringFlash[i];
+                    const active = since < 420;
+                    const t = active ? 1 - since / 420 : 0;
+                    const decay = t * t; // amplitude dies away quickly, like a real string
+
+                    // one path, stroked twice: a fat black line, then the colour inside it
+                    const path = () => {
+                        ctx.beginPath();
+                        if (active) {
+                            // a single arch (still at the ends, widest in the middle)
+                            // swinging quickly up and down while it settles
+                            const amp = 22 * decay;
+                            const osc = Math.sin(now / 9);
+                            for (let x = 0; x <= cw; x += 6) {
+                                const yy = yPx + Math.sin((x / cw) * Math.PI) * amp * osc;
+                                x === 0 ? ctx.moveTo(x, yy) : ctx.lineTo(x, yy);
+                            }
+                        } else {
+                            ctx.moveTo(0, yPx); ctx.lineTo(cw, yPx);
+                        }
+                        ctx.stroke();
+                    };
+                    ctx.lineCap = 'butt';
+                    ctx.strokeStyle = INK; ctx.lineWidth = 10 + 4 * decay; path();
+                    ctx.strokeStyle = s.color; ctx.lineWidth = 4 + 4 * decay; path();
+
+                    // string name: a bordered tag in the string's colour, hard shadow
+                    ctx.font = MONO;
+                    const tw = Math.ceil(ctx.measureText(s.note).width) + 18;
+                    const tx = 14, ty = yPx - 34;
+                    ctx.fillStyle = INK; ctx.fillRect(tx + 4, ty + 4, tw, 24);
+                    ctx.fillStyle = s.color; ctx.fillRect(tx, ty, tw, 24);
+                    ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.strokeRect(tx, ty, tw, 24);
+                    ctx.fillStyle = INK;
+                    ctx.textAlign = 'left';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(s.note, tx + 9, ty + 13);
+                });
+
+                // Hands + fingertips
+                if (lastHandResults && lastHandResults.multiHandLandmarks) {
+                    lastHandResults.multiHandLandmarks.forEach(lm => {
+                        const bones = () => {
+                            ctx.beginPath();
+                            HAND_BONES.forEach(([a, b]) => { ctx.moveTo(lm[a].x * cw, lm[a].y * ch); ctx.lineTo(lm[b].x * cw, lm[b].y * ch); });
+                            ctx.stroke();
+                        };
+                        ctx.lineCap = 'round';
+                        ctx.strokeStyle = INK; ctx.lineWidth = 6; bones();
+                        ctx.strokeStyle = PAPER; ctx.lineWidth = 2; bones();
+                        FINGERTIPS.forEach(fi => {
+                            ctx.beginPath(); ctx.arc(lm[fi].x * cw, lm[fi].y * ch, 7, 0, Math.PI * 2);
+                            ctx.fillStyle = PAPER; ctx.fill();
+                            ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.stroke();
+                        });
+                    });
+                }
+            }
+            requestAnimationFrame(draw);
+
+// Pluck a string by hand (the string buttons in the control strip): plays
+            // the sample and runs the same on-screen vibration as a tracked strum.
+            window.__pluckString = function (s) {
+                if (!STRINGS[s]) return;
+                playBass(STRINGS[s].note, 0.85, 1.0);
+                stringFlash[s] = performance.now();
+                window.postMessage({ type: 'notePlayed', instrument: 'bass', string: s, note: STRINGS[s].note }, '*');
+                if (window.jamSessionManager && window.jamSessionManager.connected) {
+                    window.jamSessionManager.sendNote(STRINGS[s].note, 0.85); // Band Mode: the band hears it too
+                }
+            };
+
+            // Band Mode: when another bassist plucks, the matching string vibrates here
+            // too (silently; jam-core.js plays every remote player's sound).
+            window.addEventListener('harmonic:remote-note', function (e) {
+                if (e.detail.instrument !== 'bass') return;
+                const s = STRINGS.findIndex(st => st.note === String(e.detail.note).toUpperCase());
+                if (s >= 0) stringFlash[s] = performance.now();
+            });
+
+/* ── Camera denial overlay helpers ──
+               The live camera + hand tracking is now driven by the MediaPipe
+               HarmonicTracker driver at the end of <body> (window.__startHarmonicCamera).
+               On failure it surfaces this neo-brutal overlay; the "Enable camera"
+               button re-runs the start path as a real user gesture (re-prompts +
+               unlocks audio). */
+            const camOverlay = document.getElementById('camOverlay');
+            const camEnableBtn = document.getElementById('camEnableBtn');
+
+            function showCamOverlay() {
+                if (camOverlay) camOverlay.classList.add('is-visible');
+                HarmonicUI.setStatus('blocked');
+            }
+            function hideCamOverlay() { if (camOverlay) camOverlay.classList.remove('is-visible'); }
+
+            // Expose overlay + audio-unlock helpers for the tracking driver.
+            window.__showCamOverlay = showCamOverlay;
+            window.__hideCamOverlay = hideCamOverlay;
+            window.__unlockAudio = unlockAudio;
+
+            // Retry button = real user gesture: re-runs start (re-prompts) + unlocks audio.
+            if (camEnableBtn) {
+                camEnableBtn.addEventListener('click', () => {
+                    unlockAudio();               // first gesture can also turn on sound
+                    if (window.__startHarmonicCamera) window.__startHarmonicCamera();
+                });
+            }
+        })();
+
+        let lastPluckTime = 0;
+        let lastPluckNote = '';
+        const lastPluckEl = document.getElementById('last-pluck-text');
+        const stringButtons = [0, 1, 2, 3].map(i => document.getElementById('card-' + i));
+
+        // "E2 · 1.4s ago", refreshed a few times a second
+        setInterval(() => {
+            if (!lastPluckTime) return;
+            lastPluckEl.textContent = lastPluckNote + ' · ' + ((Date.now() - lastPluckTime) / 1000).toFixed(1) + 's ago';
+        }, 100);
+
+        // A note was played (tracked strum or a tapped string button): flash its button.
+        window.addEventListener('message', function (e) {
+            if (!e.data || e.data.type !== 'notePlayed' || e.data.instrument !== 'bass') return;
+            const btn = stringButtons[e.data.string];
+            if (!btn) return;
+
+            stringButtons.forEach(b => {
+                b.classList.remove('active');
+                b.querySelector('.pill-status').textContent = 'IDLE';
+            });
+            void btn.offsetWidth; // restart the twang animation on rapid repeats
+            btn.classList.add('active');
+            btn.querySelector('.pill-status').textContent = 'PLUCK';
+            clearTimeout(btn._idle);
+            btn._idle = setTimeout(() => {
+                btn.classList.remove('active');
+                btn.querySelector('.pill-status').textContent = 'IDLE';
+            }, 450);
+
+            lastPluckNote = e.data.note;
+            lastPluckTime = Date.now();
+            lastPluckEl.textContent = lastPluckNote + ' · 0.0s ago';
+        });
+
+        // Tap a string button to hear it (also a quick sound check with no camera).
+        stringButtons.forEach((btn, i) => {
+            btn.addEventListener('click', () => window.__pluckString && window.__pluckString(i));
+        });
+</script>
+
+    <!-- Camera + hand tracking. HarmonicTracker (hand-tracker.js) opens the camera, runs
+         the model in a worker on frames straight from the camera track, and calls the
+         page's note detection (window.__handleResults) once per tracked frame. -->
+    <script>
+        (function () {
+            const video = document.getElementById('bassVideo');
+
+            async function startCamera() {
+                try {
+                    if (window.__hideCamOverlay) window.__hideCamOverlay();
+                    HarmonicUI.setStatus('loading');
+                    await HarmonicTracker.start(video, (results) => {
+                        if (window.__handleResults) window.__handleResults(results);
+                    });
+                    if (window.__hideCamOverlay) window.__hideCamOverlay(); // the live, mirrored feed is showing
+                    HarmonicUI.setStatus('live');
+                } catch (e) {
+                    console.error('[CV] camera/init failed', e);
+                    if (window.__showCamOverlay) window.__showCamOverlay();
+                }
+            }
+
+            // Expose so the "Enable camera" retry button can re-run the real start path.
+            window.__startHarmonicCamera = startCamera;
+            // Auto-start once the page's own script has set up its handlers.
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startCamera);
+            else startCamera();
+        })();
+    </script>
+</body>
+
+</html>

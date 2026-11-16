@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#3a3633" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%233a3633'/%3E%3Crect x='7' y='7' width='18' height='18' fill='%23ffdf6b'/%3E%3Crect x='13' y='13' width='6' height='6' fill='%233a3633'/%3E%3C/svg%3E"
+    />
+    <meta name="description" content="Symphony. A room full of instruments you play with your bare hands. No keys, no strings, no sticks: your webcam watches, you make the noise." />
+    <title>Symphony</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- the players pull MediaPipe from here; warm the connection while people browse the room -->
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+    <!-- Neo-brutalist type: Archivo Black (display) / Space Grotesk (body) / Space Mono (labels).
+         Nunito is for the intro title card only. -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Nunito:wght@800;900&family=Space+Grotesk:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <canvas class="webgl"></canvas>
+    <div id="ui"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
