@@ -12,7 +12,6 @@ for the optional features:
 | --- | --- | --- | --- |
 | `music_api.py` | 8766 | Flask | song library + MP3/MIDI → note transcription (practice/song-follow mode) |
 | `session_server.py` | 8502 | FastAPI | **Band Mode**: live jam rooms (roster + note relay over WebSocket); the site reaches it at `/jam` via the Vite proxy |
-| `websocket_server.py` | 8765 | FastAPI | legacy spectator mode (superseded) |
 | `ar_studio.py` | 8768 | Streamlit | the original desktop OpenCV/MediaPipe studio (standalone) |
 
 The players already **fail gracefully** when these aren't running — song dropdowns

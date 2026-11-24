@@ -37,8 +37,7 @@ the moves are `standby()` / `hover()` / `enter()` in
 The tokens live in three places that must stay in sync: `src/config.js` (`PALETTE`,
 used by the 3D room), `src/style.css` (studio HUD) and `public/play/harmonic.css`
 (the players). `public/play/harmonic-ui.js` holds the players' shared behaviour.
-The older `public/play/styles.css`, `app.js` and `sheet_renderer.js` are no longer
-loaded by any page. Add `?camera=demo` to a player URL to see it with a generated
+Add `?camera=demo` to a player URL to see it with a generated
 test picture instead of the webcam.
 
 ## Run it
